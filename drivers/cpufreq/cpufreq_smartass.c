@@ -87,7 +87,7 @@ static unsigned int sleep_max_freq;
  * The frequency to set when waking up from sleep.
  * When sleep_max_freq=0 this will have no effect.
  */
-#define DEFAULT_SLEEP_WAKEUP_FREQ 729600
+#define DEFAULT_SLEEP_WAKEUP_FREQ 806400
 static unsigned int sleep_wakeup_freq;
 
 /*
@@ -120,7 +120,7 @@ static unsigned int max_ramp_down;
 /*
  * CPU freq will be increased if measured load > max_cpu_load;
  */
-#define DEFAULT_MAX_CPU_LOAD 70
+#define DEFAULT_MAX_CPU_LOAD 65
 static unsigned long max_cpu_load;
 
 /*

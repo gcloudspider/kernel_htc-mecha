@@ -1,7 +1,7 @@
 VERSION = 2
 PATCHLEVEL = 6
 SUBLEVEL = 32
-EXTRAVERSION = .21_bamf_4.4c
+EXTRAVERSION = .21_bamf_4.4.1
 NAME = Man-Eating Seals of Antiquity
 
 # *DOCUMENTATION*

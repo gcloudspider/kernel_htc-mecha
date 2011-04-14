@@ -90,7 +90,7 @@ static struct cpufreq_frequency_table freq_table[] = {
 	{ 7, 1228800 },
 	{ 8, 1344000 },
 	{ 9, 1420800 },
-	{ 8, CPUFREQ_TABLE_END },
+	{ 10, CPUFREQ_TABLE_END },
 };
 
 /* Use negative numbers for sources that can't be enabled/disabled */

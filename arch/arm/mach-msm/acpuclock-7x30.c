@@ -60,7 +60,6 @@ struct clock_state {
 	struct mutex			lock;
 	uint32_t			acpu_switch_time_us;
 	uint32_t			vdd_switch_time_us;
-	unsigned long                   power_collapse_khz;
 	unsigned long			wait_for_irq_khz;
 	int				wfi_ramp_down;
 	int				pwrc_ramp_down;
@@ -80,50 +79,30 @@ struct clkctl_acpu_speed {
 static struct clock_state drv_state = { 0 };
 
 static struct cpufreq_frequency_table freq_table[] = {
-	{ 0, 245000 },
-	{ 1, 422400 },
-	{ 2, 499200 },
-	{ 3, 576000 },
-	{ 4, 652800 },
-	{ 5, 729600 },
-	{ 6, 806400 },
-	{ 7, 883200 },
-	{ 8, 960000 },
-	{ 9, 1036800 },
-	{ 10, 1113600 },
-	{ 11, 1190400 },
-	{ 12, 1267200 },
-	{ 13, 1344000 },
-	{ 14, 1420800 },
-	{ 15, 1497600 },
-	{ 16, CPUFREQ_TABLE_END },
+	{ 0, 245760 },
+	{ 1, 368640 },
+	{ 2, 768000 },
+	{ 3, 1024000 },
+	{ 4, 1280000 },
+	{ 5, 1408000 },
+	{ 6, CPUFREQ_TABLE_END },
 };
 
 /* Use negative numbers for sources that can't be enabled/disabled */
 #define SRC_LPXO (-2)
 #define SRC_AXI  (-1)
 static struct clkctl_acpu_speed acpu_freq_tbl[] = {
-	{ 24576,  SRC_LPXO, 0, 0,  30720,  900, VDD_RAW(900) },
-	{ 61440,  PLL_3,    5, 11, 61440,  900, VDD_RAW(900) },
-	{ 122880, PLL_3,    5, 5,  61440,  900, VDD_RAW(900) },
-	{ 184320, PLL_3,    5, 4,  61440,  900, VDD_RAW(900) },
-      { MAX_AXI_KHZ, SRC_AXI, 1, 0, 61440, 900, VDD_RAW(900) },
-	{ 245000, PLL_3,    5, 2,  122500, 900, VDD_RAW(900) },
-	{ 422400, PLL_3,    5, 1,  192000, 950, VDD_RAW(950) },
-	{ 499200, PLL_1,    2, 0,  192000, 950, VDD_RAW(950) },
-	{ 576000, PLL_3,    5, 1,  192000, 975, VDD_RAW(975) },
-	{ 652800, PLL_2,    3, 0,  192000, 1000, VDD_RAW(1000) },
-	{ 729600, PLL_2,    3, 0,  192000, 1025, VDD_RAW(1025) },
-	{ 806400, PLL_2,    3, 0,  192000, 1025, VDD_RAW(1025) },
-	{ 883200, PLL_2,    3, 0,  192000, 1050, VDD_RAW(1050) },
-	{ 960000, PLL_2,    3, 0,  192000, 1050, VDD_RAW(1050) },
-	{ 1036800, PLL_2,   3, 0,  192000, 1075, VDD_RAW(1075) },
-	{ 1113600, PLL_2,   3, 0,  192000, 1075, VDD_RAW(1075) },
-	{ 1190400, PLL_2,   3, 0,  192000, 1100, VDD_RAW(1100) },
-	{ 1267200, PLL_2,   3, 0,  192000, 1150, VDD_RAW(1150) },
-	{ 1344000, PLL_2,   3, 0,  192000, 1175, VDD_RAW(1175) },
-	{ 1420800, PLL_2,   3, 0,  192000, 1200, VDD_RAW(1200) },
-	{ 1497600, PLL_2,   3, 0,  192000, 1275, VDD_RAW(1275) },
+	{ 24576,  SRC_LPXO, 0, 0,  30720,  1000, VDD_RAW(1000) },
+	{ 61440,  PLL_3,    5, 11, 61440,  1000, VDD_RAW(1000) },
+	{ 122880, PLL_3,    5, 5,  61440,  1000, VDD_RAW(1000) },
+	{ 184320, PLL_3,    5, 4,  61440,  1000, VDD_RAW(1000) },
+	{ MAX_AXI_KHZ, SRC_AXI, 1, 0, 61440, 1000, VDD_RAW(1000) },
+	{ 245760, PLL_3,    5, 2,  61440,  900, VDD_RAW(900) },
+	{ 368640, PLL_3,    5, 1,  122800, 950, VDD_RAW(950) },
+	{ 768000, PLL_1,    2, 0,  153600, 1025, VDD_RAW(1025) },
+	{ 1024000, PLL_2,    3, 0,  192000, 1075, VDD_RAW(1075) },
+	{ 1280000, PLL_2,    3, 0,  192000, 1150, VDD_RAW(1150) },
+	{ 1408000, PLL_2,    3, 0,  192000, 1200, VDD_RAW(1200) },
 	{ 0 }
 };
 static unsigned long max_axi_rate;
@@ -132,33 +111,66 @@ static unsigned long max_axi_rate;
 unsigned long acpuclk_power_collapse(int from_idle)
 {
 	int ret = acpuclk_get_rate();
-	ret *= 1000;
-	if (ret > drv_state.power_collapse_khz)
-		acpuclk_set_rate(drv_state.power_collapse_khz,
-	(from_idle ? SETRATE_PC_IDLE : SETRATE_PC));
-	return ret;
+	if (drv_state.pwrc_ramp_down)
+		acpuclk_set_rate(POWER_COLLAPSE_HZ, SETRATE_PC);
+	return ret * 1000;
 }
 
 unsigned long acpuclk_get_wfi_rate(void)
 {
-	return drv_state.wait_for_irq_khz;
+	return drv_state.wait_for_irq_khz * 1000;
 }
 
 #define WAIT_FOR_IRQ_HZ (MAX_AXI_KHZ * 1000)
 unsigned long acpuclk_wait_for_irq(void)
 {
 	int ret = acpuclk_get_rate();
-	ret *= 1000;
-	if (ret > drv_state.wait_for_irq_khz)
-		acpuclk_set_rate(drv_state.wait_for_irq_khz, SETRATE_SWFI);
-	return ret;
+	if (drv_state.wfi_ramp_down)
+		acpuclk_set_rate(WAIT_FOR_IRQ_HZ, SETRATE_SWFI);
+	return ret * 1000;
 }
+
+#ifdef CONFIG_HTC_SMEM_MSMC1C2_DEBUG
+/* mARM */
+#define HTC_SMEM_MSMC1		(MSM_SHARED_RAM_BASE + 0x000F8000)
+#define HTC_SMEM_AXI_SPEED	(MSM_SHARED_RAM_BASE + 0x000F8004)
+/* aARM */
+#define HTC_SMEM_MSMC2_STAT	(MSM_SHARED_RAM_BASE + 0x000F8100)
+#define HTC_SMEM_MSMC2_LAST	(MSM_SHARED_RAM_BASE + 0x000F8104)
+#define HTC_SMEM_MSMC2_CURR	(MSM_SHARED_RAM_BASE + 0x000F8108)
+#define HTC_SMEM_MSMC2_MSMC1	(MSM_SHARED_RAM_BASE + 0x000F810C)
+#define HTC_SMEM_MSMC2_AXI	(MSM_SHARED_RAM_BASE + 0x000F8110)
+#endif
 
 static int acpuclk_set_acpu_vdd(struct clkctl_acpu_speed *s)
 {
+#ifdef CONFIG_HTC_SMEM_MSMC1C2_DEBUG
+	unsigned int smem_val;
+	int ret;
+
+	/* store current MSMC1 and AXI */
+	smem_val = readl(HTC_SMEM_MSMC1);
+	writel(smem_val, HTC_SMEM_MSMC2_MSMC1);
+	smem_val = readl(HTC_SMEM_AXI_SPEED);
+	writel(smem_val, HTC_SMEM_MSMC2_AXI);
+
+	/* store last and current(target) MSMC2 */
+	smem_val = readl(HTC_SMEM_MSMC2_CURR);
+	if (smem_val)
+		writel(smem_val, HTC_SMEM_MSMC2_LAST);
+	writel(s->vdd_mv, HTC_SMEM_MSMC2_CURR);
+
+	writel(0x11112222, HTC_SMEM_MSMC2_STAT);
+	ret = msm_spm_set_vdd(s->vdd_raw);
+	if (ret)
+		return ret;
+	/* HTC_SMEM_MSMC2_CURR is valid only when STAT:0x33334444 */
+	writel(0x33334444, HTC_SMEM_MSMC2_STAT);
+#else
 	int ret = msm_spm_set_vdd(s->vdd_raw);
 	if (ret)
 		return ret;
+#endif
 
 	/* Wait for voltage to stabilize. */
 	udelay(drv_state.vdd_switch_time_us);
@@ -482,6 +494,20 @@ static void __init lpj_init(void)
 	}
 }
 
+/* Update frequency tables for a 1024MHz PLL2. */
+/*
+void __init pll2_1024mhz_fixup(void)
+{
+	if (acpu_freq_tbl[ARRAY_SIZE(acpu_freq_tbl)-2].acpu_clk_khz != 806400
+		  || freq_table[ARRAY_SIZE(freq_table)-2].frequency != 806400) {
+		pr_err("Frequency table fixups for PLL2 rate failed.\n");
+		BUG();
+	}
+	acpu_freq_tbl[ARRAY_SIZE(acpu_freq_tbl)-2].acpu_clk_khz = 1100000;
+	freq_table[ARRAY_SIZE(freq_table)-2].frequency = 1100000;
+}
+*/
+
 #define RPM_BYPASS_MASK	(1 << 3)
 #define PMIC_MODE_MASK	(1 << 4)
 void __init msm_acpu_clock_init(struct msm_acpu_clock_platform_data *clkdata)
@@ -491,13 +517,18 @@ void __init msm_acpu_clock_init(struct msm_acpu_clock_platform_data *clkdata)
 	mutex_init(&drv_state.lock);
 	drv_state.acpu_switch_time_us = clkdata->acpu_switch_time_us;
 	drv_state.vdd_switch_time_us = clkdata->vdd_switch_time_us;
-	drv_state.power_collapse_khz = clkdata->power_collapse_khz;
 	drv_state.wfi_ramp_down = 1;
 	drv_state.pwrc_ramp_down = 1;
+	/* PLL2 runs at 1024MHz for MSM8x55. */
+/*
+	if (cpu_is_msm8x55())
+		pll2_1024mhz_fixup();
+*/
 	acpuclk_init();
 	lpj_init();
 
 	cpufreq_frequency_table_get_attr(freq_table, smp_processor_id());
 	register_acpuclock_debug_dev(&acpu_debug_7x30);
 }
+
 

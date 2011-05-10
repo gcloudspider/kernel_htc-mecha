@@ -56,7 +56,7 @@ static u64 freq_change_time;
 static u64 freq_change_time_in_idle;
 
 static cpumask_t work_cpumask;
-static unsigned int suspended;DEFAULT_SLEEP_WAKEUP_FREQ
+static unsigned int suspended;
 
 /*
  * The minimum amount of time to spend at a frequency before we can ramp down,
@@ -80,6 +80,13 @@ static unsigned int up_min_freq;
  */
 #define DEFAULT_SLEEP_MAX_FREQ 245760
 static unsigned int sleep_max_freq;
+
+/*
+ * The frequency to set when waking up from sleep.
+ * When sleep_max_freq=0 this will have no effect.
+ */
+#define DEFAULT_SLEEP_WAKEUP_FREQ 768000
+static unsigned int sleep_wakeup_freq;
 
 /*
  * Sampling rate, I highly recommend to leave it at 2.
@@ -122,7 +129,7 @@ static
 struct cpufreq_governor cpufreq_gov_smartass = {
 	.name = "smartass",
 	.governor = cpufreq_governor_smartass,
-	.max_transition_latency = 6000000,
+	.max_transition_latency = 9000000,
 	.owner = THIS_MODULE,
 };
 
@@ -354,7 +361,28 @@ static ssize_t store_sleep_max_freq(struct cpufreq_policy *policy, const char *b
 }
 
 static struct freq_attr sleep_max_freq_attr = __ATTR(sleep_max_freq, 0644,
-		show_sleep_max_freq, store_sleep_max_freq);
+    show_sleep_max_freq, store_sleep_max_freq);
+
+static ssize_t show_sleep_wakeup_freq(struct cpufreq_policy *policy, char *buf)
+{
+  return sprintf(buf, "sleep_wakeup_freq = %u\n", sleep_wakeup_freq);
+}
+
+static ssize_t store_sleep_wakeup_freq(struct cpufreq_policy *policy, const char *buf, size_t count)
+{
+        ssize_t res;
+  unsigned long input;
+  res = strict_strtoul(buf, 0, &input);
+  if (res >= 0 && input >= 0)
+    sleep_wakeup_freq = input;
+  if (res)
+    return res;
+  else
+    return count;
+}    
+
+static struct freq_attr sleep_wakeup_freq_attr = __ATTR(sleep_wakeup_freq, 0644,
+    show_sleep_wakeup_freq, store_sleep_wakeup_freq);
 
 static ssize_t show_sample_rate_jiffies(struct cpufreq_policy *policy, char *buf)
 {
@@ -450,6 +478,7 @@ static struct attribute * smartass_attributes[] = {
 	&down_rate_us_attr.attr,
 	&up_min_freq_attr.attr,
 	&sleep_max_freq_attr.attr,
+	&sleep_wakeup_freq_attr.attr,
 	&sample_rate_jiffies_attr.attr,
 	&ramp_up_step_attr.attr,
 	&max_ramp_down_attr.attr,
@@ -492,9 +521,6 @@ static int cpufreq_governor_smartass(struct cpufreq_policy *new_policy,
 		pm_idle = cpufreq_idle;
 
 		this_smartass->cur_policy = new_policy;
-		this_smartass->cur_policy->max = CONFIG_MSM_CPU_FREQ_ONDEMAND_MAX;
-		this_smartass->cur_policy->min = CONFIG_MSM_CPU_FREQ_ONDEMAND_MIN;
-		this_smartass->cur_policy->cur = CONFIG_MSM_CPU_FREQ_ONDEMAND_MAX;
 		this_smartass->enable = 1;
 
 		// notice no break here!
@@ -541,7 +567,7 @@ static void smartass_suspend(int cpu, int suspend)
 						CPUFREQ_RELATION_H);
 		}
 	} else { // resume at max speed:
-		__cpufreq_driver_target(policy, policy->max,
+		__cpufreq_driver_target(policy, sleep_wakeup_freq,
 					CPUFREQ_RELATION_H);
 	}
 
@@ -573,6 +599,7 @@ static int __init cpufreq_smartass_init(void)
 	down_rate_us = DEFAULT_DOWN_RATE_US;
 	up_min_freq = DEFAULT_UP_MIN_FREQ;
 	sleep_max_freq = DEFAULT_SLEEP_MAX_FREQ;
+	sleep_wakeup_freq = DEFAULT_SLEEP_WAKEUP_FREQ;
 	sample_rate_jiffies = DEFAULT_SAMPLE_RATE_JIFFIES;
 	ramp_up_step = DEFAULT_RAMP_UP_STEP;
 	max_ramp_down = DEFAULT_MAX_RAMP_DOWN;

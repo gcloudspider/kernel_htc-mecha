@@ -43,13 +43,6 @@ config CFQ_GROUP_IOSCHED
 	---help---
 	  Enable group IO scheduling in CFQ.
 
-config IOSCHED_VR
-	tristate "V(R) I/O scheduler"
-	default y
-	---help---
-	  Requests are chosen according to SSTF with a penalty of rev_penalty
-	  for switching head direction.
-
 choice
 	prompt "Default I/O scheduler"
 	default DEFAULT_CFQ

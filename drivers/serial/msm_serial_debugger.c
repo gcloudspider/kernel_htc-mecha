@@ -313,7 +313,6 @@ void __naked get_mode_regs(struct mode_regs *regs)
 static void dump_allregs(unsigned *regs)
 {
 	struct mode_regs mode_regs;
-	memset(&mode_regs, 0, sizeof(struct mode_regs));
 	dump_regs(regs);
 	get_mode_regs(&mode_regs);
 	dprintf(" svc: sp %08x  lr %08x  spsr %08x\n",

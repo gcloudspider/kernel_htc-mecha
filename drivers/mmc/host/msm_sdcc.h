@@ -27,7 +27,7 @@
 #define MMCICLOCK		0x004
 #define MCI_CLK_ENABLE		(1 << 8)
 #define MCI_CLK_PWRSAVE		(1 << 9)
-#define MCI_CLK_WIDEBUS         (1 << 10)
+#define MCI_CLK_WIDEBUS		(1 << 10)
 #define MCI_CLK_WIDEBUS_1	(0 << 10)
 #define MCI_CLK_WIDEBUS_4	(2 << 10)
 #define MCI_CLK_WIDEBUS_8	(3 << 10)
@@ -156,7 +156,7 @@
 #define MCI_IRQENABLE	\
 	(MCI_CMDCRCFAILMASK|MCI_DATACRCFAILMASK|MCI_CMDTIMEOUTMASK|	\
 	MCI_DATATIMEOUTMASK|MCI_TXUNDERRUNMASK|MCI_RXOVERRUNMASK|	\
-	MCI_CMDRESPENDMASK|MCI_CMDSENTMASK|MCI_DATAENDMASK)
+	MCI_CMDRESPENDMASK|MCI_CMDSENTMASK|MCI_DATAENDMASK|MCI_PROGDONEMASK)
 
 /*
  * The size of the FIFO in bytes.
@@ -166,6 +166,11 @@
 #define MCI_FIFOHALFSIZE (MCI_FIFOSIZE / 2)
 
 #define NR_SG		32
+/*
+ * Set the request timeout to 10secs to allow
+ * bad cards/controller to respond.
+ */
+#define MSM_MMC_REQ_TIMEOUT	5000 /* msecs */
 
 struct clk;
 
@@ -249,6 +254,10 @@ struct msmsdcc_host {
 
 	struct timer_list	timer;
 	unsigned int		oldstat;
+#ifdef CONFIG_WIMAX
+    unsigned long       irq_time;
+	unsigned int        sdcc_during_suspend;
+#endif
 
 	struct msmsdcc_dma_data	dma;
 	struct msmsdcc_pio_data	pio;
@@ -284,6 +293,9 @@ struct msmsdcc_host {
 	unsigned int    sdcc_suspending;
 	unsigned int sdcc_irq_disabled;
 	unsigned int	async_irq_during_suspending;
+	struct timer_list req_tout_timer;
+	unsigned int	irq_status[5];
+	unsigned int	irq_counter;
 };
 
 int msmsdcc_set_pwrsave(struct mmc_host *mmc, int pwrsave);

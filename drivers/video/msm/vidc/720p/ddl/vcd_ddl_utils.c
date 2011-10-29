@@ -54,7 +54,7 @@ void ddl_pmem_alloc(struct ddl_buf_addr *buff_addr, size_t sz, u32 align)
 		kmalloc((sz + guard_bytes), GFP_KERNEL);
 
 	if (!buff_addr->virtual_base_addr) {
-		ERR("\n ERROR %s:%u kamlloc fails to allocate"
+		ERR("ERROR %s:%u kamlloc fails to allocate"
 			" sz + guard_bytes = %u\n", __func__, __LINE__,
 			(sz + guard_bytes));
 		return;
@@ -159,7 +159,7 @@ void ddl_pmem_free(struct ddl_buf_addr buff_addr)
 
 	if ((buff_addr.physical_base_addr) &&
 		pmem_kfree((s32) buff_addr.physical_base_addr)) {
-		ERR("\n %s(): Error in Freeing ddl_pmem_free "
+		ERR("%s(): Error in Freeing ddl_pmem_free "
 		"Physical Address %p", __func__,
 		buff_addr.physical_base_addr);
 	}
@@ -218,12 +218,12 @@ void ddl_calc_core_time(u8 codec)
 void ddl_reset_time_variables(u8 codec)
 {
 	if (!codec) {
-		DBG("\n Reset Decoder time variables");
+		DBG("Reset Decoder time variables");
 		ddl_dec_t1 = 0;
 		ddl_dec_ttotal = 0;
 		ddl_dec_count = 0;
 	} else if (codec == 1) {
-		DBG("\n Reset Encoder time variables ");
+		DBG("Reset Encoder time variables ");
 		ddl_enc_t1 = 0;
 		ddl_enc_ttotal = 0;
 		ddl_enc_count = 0;

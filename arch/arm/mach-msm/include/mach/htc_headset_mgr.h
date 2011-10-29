@@ -23,10 +23,12 @@
 #include <mach/msm_rpcrouter.h>
 
 #include <linux/input.h>
-#include <linux/rtc.h>
 #include <linux/switch.h>
 #include <linux/wakelock.h>
 
+#define HS_ERR(fmt, arg...) \
+	printk(KERN_INFO "[" DRIVER_NAME "_ERR] (%s) " fmt "\n", \
+		__func__, ## arg)
 #define HS_LOG(fmt, arg...) \
 	printk(KERN_INFO "[" DRIVER_NAME "] (%s) " fmt "\n", __func__, ## arg)
 #define HS_LOG_TIME(fmt, arg...) do { \
@@ -34,24 +36,29 @@
 	struct rtc_time tm; \
 	getnstimeofday(&ts); \
 	rtc_time_to_tm(ts.tv_sec, &tm); \
-		printk(KERN_INFO "[" DRIVER_NAME "] (%s) " fmt \
+	printk(KERN_INFO "[" DRIVER_NAME "] (%s) " fmt \
 		" (%02d-%02d %02d:%02d:%02d.%03lu)\n", __func__, \
 		## arg, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, \
 		tm.tm_min, tm.tm_sec, ts.tv_nsec / 1000000); \
 	} while (0)
-#if 0
-#define HS_DBG_LOG(fmt, arg...) \
-	printk(KERN_INFO "##### [" DRIVER_NAME "] (%s) " fmt "\n", \
-	       __func__, ## arg)
-#else
-#define HS_DBG_LOG(fmt, arg...) {}
-#endif
+#define HS_DBG(fmt, arg...) \
+	if (hs_debug_log_state()) {  \
+		printk(KERN_INFO "##### [" DRIVER_NAME "] (%s) " fmt "\n", \
+		       __func__, ## arg); \
+	}
 
 #define DEVICE_ACCESSORY_ATTR(_name, _mode, _show, _store) \
 	struct device_attribute dev_attr_##_name = \
 	__ATTR(flag, _mode, _show, _store)
 
+#define DEVICE_HEADSET_ATTR(_name, _mode, _show, _store) \
+	struct device_attribute dev_attr_headset_##_name = \
+	__ATTR(_name, _mode, _show, _store)
+
 #define DRIVER_HS_MGR_RPC_SERVER	(1 << 0)
+
+#define DEBUG_FLAG_LOG		(1 << 0)
+#define DEBUG_FLAG_ADC		(1 << 1)
 
 #define BIT_HEADSET		(1 << 0)
 #define BIT_HEADSET_NO_MIC	(1 << 1)
@@ -70,16 +77,26 @@
 
 #define MASK_HEADSET		(BIT_HEADSET | BIT_HEADSET_NO_MIC)
 #define MASK_35MM_HEADSET	(BIT_HEADSET | BIT_HEADSET_NO_MIC | \
-				BIT_35MM_HEADSET)
+				BIT_35MM_HEADSET | BIT_TV_OUT)
 #define MASK_FM_ATTRIBUTE	(BIT_FM_HEADSET | BIT_FM_SPEAKER)
 #define MASK_USB_HEADSET	(BIT_USB_AUDIO_OUT)
 
 #define HS_DEF_MIC_ADC_10_BIT		200
-#define HS_DEF_MIC_ADC_16_BIT		14894 /* (0.5 / 2.2) * (2 ^ 16) */
+#define HS_DEF_MIC_ADC_15_BIT_MAX	25320
+#define HS_DEF_MIC_ADC_15_BIT_MIN	7447
+#define HS_DEF_MIC_ADC_16_BIT_MAX	50641
+#define HS_DEF_MIC_ADC_16_BIT_MIN	14894
+#define HS_DEF_MIC_ADC_16_BIT_MAX2	56007
+#define HS_DEF_MIC_ADC_16_BIT_MIN2	14894
+#define HS_DEF_HPTV_ADC_16_BIT_MAX	16509
+#define HS_DEF_HPTV_ADC_16_BIT_MIN	6456
+
+#define HS_DEF_MIC_DETECT_COUNT		10
 
 #define HS_DELAY_ZERO			0
+#define HS_DELAY_SEC			1000
 #define HS_DELAY_MIC_BIAS		200
-#define HS_DELAY_MIC_DETECT		500
+#define HS_DELAY_MIC_DETECT		1000
 #define HS_DELAY_INSERT			500
 #define HS_DELAY_REMOVE			200
 #define HS_DELAY_BUTTON			500
@@ -93,6 +110,7 @@
 
 #define HS_WAKE_LOCK_TIMEOUT		(2 * HZ)
 #define HS_RPC_TIMEOUT			(5 * HZ)
+#define HS_MIC_DETECT_TIMEOUT		(HZ + HZ / 2)
 
 /* Definitions for Headset RPC Server */
 #define HS_RPC_SERVER_PROG		0x30100004
@@ -116,17 +134,21 @@
 #define HS_MGR_KEYCODE_MEDIA	KEY_MEDIA		/* 226 */
 #define HS_MGR_KEYCODE_SEND	KEY_SEND		/* 231 */
 
-#define HEADSET_NO_MIC		0
-#define HEADSET_MIC		1
-#define HEADSET_METRICO		2
-
-#define HTC_35MM_UNPLUG 0
-#define HTC_35MM_NO_MIC 1
-#define HTC_35MM_MIC 2
+enum {
+	HEADSET_UNPLUG		= 0,
+	HEADSET_NO_MIC		= 1,
+	HEADSET_MIC		= 2,
+	HEADSET_METRICO		= 3,
+	HEADSET_UNKNOWN_MIC	= 4,
+	HEADSET_TV_OUT		= 5,
+	HEADSET_BEATS		= 6,
+	HEADSET_INDICATOR	= 7,
+};
 
 enum {
 	HEADSET_REG_HPIN_GPIO,
 	HEADSET_REG_REMOTE_ADC,
+	HEADSET_REG_REMOTE_KEYCODE,
 	HEADSET_REG_RPC_KEY,
 	HEADSET_REG_MIC_STATUS,
 	HEADSET_REG_MIC_BIAS,
@@ -179,6 +201,12 @@ struct external_headset {
 	int status;
 };
 
+struct headset_adc_config {
+	int type;
+	uint32_t adc_max;
+	uint32_t adc_min;
+};
+
 struct headset_notifier {
 	int id;
 	void *func;
@@ -187,6 +215,7 @@ struct headset_notifier {
 struct hs_notifier_func {
 	int (*hpin_gpio)(void);
 	int (*remote_adc)(int *);
+	int (*remote_keycode)(int);
 	void (*rpc_key)(int);
 	int (*mic_status)(void);
 	int (*mic_bias_enable)(int);
@@ -199,6 +228,12 @@ struct htc_headset_mgr_platform_data {
 	unsigned int driver_flag;
 	int headset_devices_num;
 	struct platform_device **headset_devices;
+	int headset_config_num;
+	struct headset_adc_config *headset_config;
+
+	unsigned int hptv_det_hp_gpio;
+	unsigned int hptv_det_tv_gpio;
+	unsigned int hptv_sel_gpio;
 };
 
 struct htc_headset_mgr_info {
@@ -211,6 +246,7 @@ struct htc_headset_mgr_info {
 	struct external_headset usb_headset;
 
 	struct class *htc_accessory_class;
+	struct device *headset_dev;
 	struct device *tty_dev;
 	struct device *fm_dev;
 	struct device *debug_dev;
@@ -230,10 +266,11 @@ struct htc_headset_mgr_info {
 
 	/* The variables were used by 35mm headset*/
 	int key_level_flag;
-	int ext_35mm_status;
-	int h2w_35mm_status;
+	int hs_35mm_type;
+	int h2w_35mm_type;
 	int is_ext_insert;
 	int mic_bias_state;
+	int mic_detect_counter;
 	int metrico_status; /* For HW Metrico lab test */
 };
 
@@ -246,9 +283,15 @@ void hs_notify_driver_ready(char *name);
 void hs_notify_hpin_irq(void);
 int hs_notify_plug_event(int insert);
 int hs_notify_key_event(int key_code);
+int hs_notify_key_irq(void);
+
+int hs_debug_log_state(void);
 
 void hs_set_mic_select(int state);
 struct class *hs_get_attribute_class(void);
+
+int headset_get_type(void);
+int headset_get_type_sync(int count, unsigned int interval);
 
 extern int switch_send_event(unsigned int bit, int on);
 

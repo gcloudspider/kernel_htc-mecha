@@ -442,7 +442,7 @@ dhd_dongle_setmemsize(struct dhd_bus *bus, int mem_size)
 {
 	int32 min_size =  DONGLE_MIN_MEMSIZE;
 	/* Restrict the memsize to user specified limit */
-	DHD_ERROR(("user: Restrict the dongle ram size to %d, min accepted %d\n",
+	DHD_DEFAULT(("user: Restrict the dongle ram size to %d, min accepted %d\n",
 		dhd_dongle_memsize, min_size));
 	if ((dhd_dongle_memsize > min_size) &&
 		(dhd_dongle_memsize < (int32)bus->orig_ramsize))
@@ -715,7 +715,7 @@ dhdsdio_clkctl(dhd_bus_t *bus, uint target, bool pendok)
 		else if (bus->clkstate == CLK_AVAIL)
 			dhdsdio_htclk(bus, FALSE, FALSE);
 		else
-			DHD_ERROR(("dhdsdio_clkctl: request for %d -> %d\n",
+			DHD_DEFAULT(("dhdsdio_clkctl: request for %d -> %d\n",
 			           bus->clkstate, target));
 		dhd_os_wd_timer(bus->dhd, dhd_watchdog_ms);
 		break;
@@ -1334,7 +1334,7 @@ dhd_bus_rxctl(struct dhd_bus *bus, uchar *msg, uint msglen)
 		DHD_CTL(("%s: resumed on rxctl frame, got %d expected %d\n",
 		         __FUNCTION__, rxlen, msglen));
 	} else if (timeleft == 0) {
-		DHD_ERROR(("%s: resumed on timeout\n", __FUNCTION__));
+		DHD_DEFAULT(("%s: resumed on timeout\n", __FUNCTION__));
 #ifdef WLAN_PROTECT
 		if (!start_poll) {
 			bus->pollrate = 1;
@@ -1374,7 +1374,7 @@ dhd_bus_rxctl(struct dhd_bus *bus, uchar *msg, uint msglen)
 			start_poll = 0;
 		}
 		wl_iw_set_busdown(1);
-		DHD_ERROR(("bring bus down!\n"));
+		DHD_ERROR(("dhd_bus_rxctl:resumed on timeout(count=2) -> bring bus down!\n"));
 	}
 #endif
 	return rxlen ? (int)rxlen : -ETIMEDOUT;
@@ -2285,7 +2285,7 @@ dhdsdio_download_state(dhd_bus_t *bus, bool enter)
 		}
 
 		if ((bcmerror = dhdsdio_write_vars(bus))) {
-			DHD_ERROR(("%s: no vars written to RAM\n", __FUNCTION__));
+			DHD_DEFAULT(("%s: no vars written to RAM\n", __FUNCTION__));
 			bcmerror = 0;
 		}
 
@@ -2568,7 +2568,10 @@ dhd_bus_init(dhd_pub_t *dhdp, bool enforce_mutex)
 
 		/* Set up the interrupt mask and enable interrupts */
 		bus->hostintmask = HOSTINTMASK;
-		W_SDREG(bus->hostintmask, &bus->regs->hostintmask, retries);
+#ifdef HTC_KlocWork
+    if(bus->regs != NULL)
+#endif
+        W_SDREG(bus->hostintmask, &bus->regs->hostintmask, retries);
 
 		bcmsdh_cfg_write(bus->sdh, SDIO_FUNC_1, SBSDIO_WATERMARK, (uint8)watermark, &err);
 
@@ -3801,14 +3804,13 @@ dhdsdio_hostmail(dhd_bus_t *bus)
 }
 
 #ifdef MMC_RECOVER
-static uint32 mmc_recover_saved_jiffies = 0;
 static uint8 prev_tx_seq = 0;
 static uint8 prev_tx_max = 0;
 static int max_equal_count = 0;
 static int start_mmc_recover = 0;
 void dhdsdio_set_mmc_recover(int set)
 {
-	myprintf("set mmc recover %d\n", set);
+	// myprintf("set mmc recover %d\n", set);
 	if (set)
 		start_mmc_recover = 1;
 	else
@@ -3978,33 +3980,21 @@ clkwait:
 #ifdef MMC_RECOVER
 	if (start_mmc_recover) {
 		if ((bus->tx_max == bus->tx_seq)&&(bus->tx_max == prev_tx_max)&&(bus->tx_seq == prev_tx_seq)) {
-			/* check point */
-			if (mmc_recover_saved_jiffies == 0)
-				mmc_recover_saved_jiffies = jiffies;
-			else {
-				if (jiffies > (mmc_recover_saved_jiffies + HZ)) {
-					max_equal_count++;
-					mmc_recover_saved_jiffies = jiffies;
-					myprintf("bad count %d\n", max_equal_count);
-				} else if (jiffies < mmc_recover_saved_jiffies){
-					max_equal_count = 0;
-					mmc_recover_saved_jiffies = 0;
-				}
-			}
+			max_equal_count++;
+			//myprintf("bad case, count %d\n", max_equal_count);
+			//myprintf("framecnt = %d\n", framecnt);
 		} else {
 			max_equal_count = 0;
-			mmc_recover_saved_jiffies = 0;
 		}
 
 		prev_tx_max = bus->tx_max;
 		prev_tx_seq = bus->tx_seq;
 
-		if (max_equal_count > 1) {
+		if (max_equal_count >= 5) {
 			bus->tx_seq = (bus->tx_seq + 1) % SDPCM_SEQUENCE_WRAP;
 			//bus->tx_max = bus->tx_seq + 2;
-			myprintf("reset count %d\n", max_equal_count);
 			max_equal_count = 0;
-			mmc_recover_saved_jiffies = 0;
+			//myprintf("reset count\n");
 		}
 	}
 #endif
@@ -4858,7 +4848,7 @@ dhdsdio_probe_attach(struct dhd_bus *bus, osl_t *osh, void *sdh, void *regsva,
 		if (dhd_dongle_memsize)
 			dhd_dongle_setmemsize(bus, dhd_dongle_memsize);
 
-		DHD_ERROR(("DHD: dongle ram size is set to %d(orig %d)\n",
+		DHD_DEFAULT(("DHD: dongle ram size is set to %d(orig %d)\n",
 			bus->ramsize, bus->orig_ramsize));
 	}
 

@@ -32,6 +32,7 @@
 #include <linux/workqueue.h>
 #include <linux/android_pmem.h>
 #include <linux/clk.h>
+#include <linux/switch.h>
 #include <linux/timer.h>
 
 #include "vidc_type.h"
@@ -42,15 +43,24 @@
 
 
 #if DEBUG
-#define DBG(x...) printk(KERN_DEBUG x)
+#define DBG(x...) printk(KERN_DEBUG "[VID] " x)
 #else
 #define DBG(x...)
 #endif
 
-#define INFO(x...) printk(KERN_INFO x)
-#define ERR(x...) printk(KERN_ERR x)
+#define INFO(x...) printk(KERN_INFO "[VID] " x)
+#define ERR(x...) printk(KERN_ERR "[VID] " x)
 
 #define VID_DEC_NAME		"msm_vidc_dec"
+
+extern int wlan_ioprio_idle;
+
+static struct switch_dev vdec_switch = {
+	.name = "vdec", /* This is not typo. We use same uevent as encoder */
+};
+
+#define VDEC_STATE_OFF 0
+#define VDEC_STATE_ON  (1 << 0)
 
 static struct vid_dec_dev *vid_dec_device_p;
 static dev_t vid_dec_dev_num;
@@ -290,44 +300,44 @@ static void vid_dec_lean_event(struct video_client_ctx *client_ctx,
 
 	switch (event) {
 	case VCD_EVT_IND_OUTPUT_RECONFIG:
-		INFO("\n msm_vidc_dec: Sending VDEC_MSG_EVT_CONFIG_CHANGED"
+		INFO("msm_vidc_dec: Sending VDEC_MSG_EVT_CONFIG_CHANGED"
 			 " to client");
 		vdec_msg->vdec_msg_info.msgcode = VDEC_MSG_EVT_CONFIG_CHANGED;
 		break;
 	case VCD_EVT_IND_RESOURCES_LOST:
-		INFO("\n msm_vidc_dec: Sending VDEC_EVT_RESOURCES_LOST"
+		INFO("msm_vidc_dec: Sending VDEC_EVT_RESOURCES_LOST"
 			 " to client");
 		vdec_msg->vdec_msg_info.msgcode = VDEC_EVT_RESOURCES_LOST;
 		break;
 	case VCD_EVT_RESP_FLUSH_INPUT_DONE:
-		INFO("\n msm_vidc_dec: Sending VDEC_MSG_RESP_FLUSH_INPUT_DONE"
+		INFO("msm_vidc_dec: Sending VDEC_MSG_RESP_FLUSH_INPUT_DONE"
 			 " to client");
 		vdec_msg->vdec_msg_info.msgcode =
 		    VDEC_MSG_RESP_FLUSH_INPUT_DONE;
 		break;
 	case VCD_EVT_RESP_FLUSH_OUTPUT_DONE:
-		INFO("\n msm_vidc_dec: Sending VDEC_MSG_RESP_FLUSH_OUTPUT_DONE"
+		INFO("msm_vidc_dec: Sending VDEC_MSG_RESP_FLUSH_OUTPUT_DONE"
 			 " to client");
 		vdec_msg->vdec_msg_info.msgcode =
 		    VDEC_MSG_RESP_FLUSH_OUTPUT_DONE;
 		break;
 	case VCD_EVT_IND_HWERRFATAL:
-		INFO("\n msm_vidc_dec: Sending VDEC_MSG_EVT_HW_ERROR"
+		INFO("msm_vidc_dec: Sending VDEC_MSG_EVT_HW_ERROR"
 			 " to client");
 		vdec_msg->vdec_msg_info.msgcode = VDEC_MSG_EVT_HW_ERROR;
 		break;
 	case VCD_EVT_RESP_START:
-		INFO("\n msm_vidc_dec: Sending VDEC_MSG_RESP_START_DONE"
+		INFO("msm_vidc_dec: Sending VDEC_MSG_RESP_START_DONE"
 			 " to client");
 		vdec_msg->vdec_msg_info.msgcode = VDEC_MSG_RESP_START_DONE;
 		break;
 	case VCD_EVT_RESP_STOP:
-		INFO("\n msm_vidc_dec: Sending VDEC_MSG_RESP_STOP_DONE"
+		INFO("msm_vidc_dec: Sending VDEC_MSG_RESP_STOP_DONE"
 			 " to client");
 		vdec_msg->vdec_msg_info.msgcode = VDEC_MSG_RESP_STOP_DONE;
 		break;
 	case VCD_EVT_RESP_PAUSE:
-		INFO("\n msm_vidc_dec: Sending VDEC_MSG_RESP_PAUSE_DONE"
+		INFO("msm_vidc_dec: Sending VDEC_MSG_RESP_PAUSE_DONE"
 			 " to client");
 		vdec_msg->vdec_msg_info.msgcode = VDEC_MSG_RESP_PAUSE_DONE;
 		break;
@@ -702,16 +712,16 @@ static u32 vid_dec_pause_resume(struct video_client_ctx *client_ctx, u32 pause)
   u32 vcd_status;
 
 	if (!client_ctx) {
-		ERR("\n %s(): Invalid client_ctx", __func__);
+		ERR("%s(): Invalid client_ctx", __func__);
 		return false;
 	}
 
 	if (pause) {
-		INFO("\n msm_vidc_dec: PAUSE command from client = %p\n",
+		INFO("msm_vidc_dec: PAUSE command from client = %p\n",
 			 client_ctx);
 		vcd_status = vcd_pause(client_ctx->vcd_handle);
 	} else{
-		INFO("\n msm_vidc_dec: RESUME command from client = %p\n",
+		INFO("msm_vidc_dec: RESUME command from client = %p\n",
 			 client_ctx);
 		vcd_status = vcd_resume(client_ctx->vcd_handle);
 	}
@@ -728,15 +738,15 @@ static u32 vid_dec_start_stop(struct video_client_ctx *client_ctx, u32 start)
 	struct vid_dec_msg *vdec_msg = NULL;
 	u32 vcd_status;
 
-	INFO("\n msm_vidc_dec: Inside %s()", __func__);
+	INFO("msm_vidc_dec: Inside %s()", __func__);
 	if (!client_ctx) {
-		ERR("\n Invalid client_ctx");
+		ERR("Invalid client_ctx");
 		return false;
 	}
 
 	if (start) {
 		if (client_ctx->seq_header_set) {
-			INFO("\n %s(): Seq Hdr set: Send START_DONE to client",
+			INFO("%s(): Seq Hdr set: Send START_DONE to client",
 				 __func__);
 			vdec_msg = kzalloc(sizeof(*vdec_msg), GFP_KERNEL);
 			if (!vdec_msg) {
@@ -758,7 +768,7 @@ static u32 vid_dec_start_stop(struct video_client_ctx *client_ctx, u32 start)
 			    client_ctx);
 
 		} else {
-			INFO("\n %s(): Calling decode_start()", __func__);
+			INFO("%s(): Calling decode_start()", __func__);
 			vcd_status =
 			    vcd_decode_start(client_ctx->vcd_handle, NULL);
 
@@ -769,7 +779,7 @@ static u32 vid_dec_start_stop(struct video_client_ctx *client_ctx, u32 start)
 			}
 		}
 	} else {
-		INFO("\n %s(): Calling vcd_stop()", __func__);
+		INFO("%s(): Calling vcd_stop()", __func__);
 		mutex_lock(&vid_dec_device_p->lock);
 		vcd_status = VCD_ERR_FAIL;
 		if (!client_ctx->stop_called) {
@@ -887,10 +897,10 @@ static u32 vid_dec_flush(struct video_client_ctx *client_ctx,
 {
 	u32 vcd_status = VCD_ERR_FAIL;
 
-	INFO("\n msm_vidc_dec: %s() called with dir = %u", __func__,
+	INFO("msm_vidc_dec: %s() called with dir = %u", __func__,
 		 flush_dir);
 	if (!client_ctx) {
-		ERR("\n Invalid client_ctx");
+		ERR("Invalid client_ctx");
 		return false;
 	}
 
@@ -954,14 +964,13 @@ static u32 vid_dec_get_next_msg(struct video_client_ctx *client_ctx,
 
 	rc = wait_event_interruptible(client_ctx->msg_wait,
 				      vid_dec_msg_pending(client_ctx));
-	if (rc < 0 || client_ctx->stop_msg) {
+
+	if (rc < 0) {
 		DBG("rc = %d, stop_msg = %u\n", rc, client_ctx->stop_msg);
-		if (rc == -ERESTARTSYS && !client_ctx->stop_msg)
-		{
-			ERR("%s(): by system interrupt (retry), rc = %d\n", __func__, rc);
-			return true;
-		}
-		return false;
+		return rc;
+	} else if (client_ctx->stop_msg) {
+		DBG("rc = %d, stop_msg = %u\n", rc, client_ctx->stop_msg);
+		return -EIO;
 	}
 
 	mutex_lock(&client_ctx->msg_queue_lock);
@@ -1159,12 +1168,16 @@ static int vid_dec_ioctl(struct inode *inode, struct file *file,
 		result = vid_dec_start_stop(client_ctx, true);
 		if (!result)
 			return -EIO;
+		switch_set_state(&vdec_switch, VDEC_STATE_ON);
+		wlan_ioprio_idle = 1;
 		break;
 	}
 	case VDEC_IOCTL_CMD_STOP:
 	{
 		DBG("VDEC_IOCTL_CMD_STOP\n");
 		result = vid_dec_start_stop(client_ctx, false);
+		switch_set_state(&vdec_switch, VDEC_STATE_OFF);
+		wlan_ioprio_idle = 0;
 		if (!result)
 			return -EIO;
 		break;
@@ -1237,11 +1250,14 @@ static int vid_dec_ioctl(struct inode *inode, struct file *file,
 		if (copy_from_user(&vdec_msg, arg, sizeof(vdec_msg)))
 			return -EFAULT;
 		result = vid_dec_get_next_msg(client_ctx, &vdec_msg_info);
-		if (!result)
-			return -EIO;
+
 		if (copy_to_user(vdec_msg.out, &vdec_msg_info,
 					sizeof(vdec_msg_info)))
 			return -EFAULT;
+
+                 if (result)
+			return result;
+
 		break;
 	}
 	case VDEC_IOCTL_STOP_NEXT_MSG:
@@ -1356,9 +1372,9 @@ static u32 vid_dec_close_client(struct video_client_ctx *client_ctx)
 	struct vid_dec_msg *vdec_msg;
 	u32 vcd_status;
 
-	INFO("\n msm_vidc_dec: Inside %s()", __func__);
+	INFO("msm_vidc_dec: Inside %s()", __func__);
 	if (!client_ctx || (!client_ctx->vcd_handle)) {
-		ERR("\n Invalid client_ctx");
+		ERR("Invalid client_ctx");
 		return false;
 	}
 
@@ -1402,7 +1418,7 @@ static int vid_dec_open(struct inode *inode, struct file *file)
 	u32 vcd_status = VCD_ERR_FAIL;
 	u8 client_count = 0;
 
-	INFO("\n msm_vidc_dec: Inside %s()", __func__);
+	INFO("msm_vidc_dec: Inside %s()", __func__);
 	mutex_lock(&vid_dec_device_p->lock);
 
 	client_count = vcd_get_num_of_clients();
@@ -1416,12 +1432,16 @@ static int vid_dec_open(struct inode *inode, struct file *file)
 	DBG(" Virtual Address of ioremap is %p\n", vid_dec_device_p->virt_base);
 	if (!vid_dec_device_p->num_clients) {
 		if (!vidc_load_firmware())
+			{
+			mutex_unlock(&vid_dec_device_p->lock);
 			return -ENODEV;
+			}
 	}
 
 	client_index = vid_dec_get_empty_client_index();
 	if (client_index == -1) {
 		ERR("%s() : No free clients client_index == -1\n", __func__);
+		mutex_unlock(&vid_dec_device_p->lock);
 		return -ENODEV;
 	}
 	client_ctx = &vid_dec_device_p->vdec_clients[client_index];
@@ -1459,13 +1479,15 @@ static int vid_dec_release(struct inode *inode, struct file *file)
 {
 	struct video_client_ctx *client_ctx = file->private_data;
 
-	INFO("\n msm_vidc_dec: Inside %s()", __func__);
+	INFO("msm_vidc_dec: Inside %s()", __func__);
 	vid_dec_close_client(client_ctx);
 	vidc_release_firmware();
 #ifndef USE_RES_TRACKER
 	vidc_disable_clk();
 #endif
-	INFO("\n msm_vidc_dec: Return from %s()", __func__);
+	switch_set_state(&vdec_switch, VDEC_STATE_OFF);
+	wlan_ioprio_idle = 0;
+	INFO("msm_vidc_dec: Return from %s()", __func__);
 	return 0;
 }
 
@@ -1500,7 +1522,7 @@ static int vid_dec_vcd_init(void)
 	u32 i;
 
 	/* init_timer(&hw_timer); */
-	INFO("\n msm_vidc_dec: Inside %s()", __func__);
+	INFO("msm_vidc_dec: Inside %s()", __func__);
 	vid_dec_device_p->num_clients = 0;
 
 	for (i = 0; i < VIDC_MAX_NUM_CLIENTS; i++) {
@@ -1542,7 +1564,7 @@ static int __init vid_dec_init(void)
 	int rc = 0;
 	struct device *class_devp;
 
-	INFO("\n msm_vidc_dec: Inside %s()", __func__);
+	INFO("msm_vidc_dec: Inside %s()", __func__);
 	vid_dec_device_p = kzalloc(sizeof(struct vid_dec_dev), GFP_KERNEL);
 	if (!vid_dec_device_p) {
 		ERR("%s Unable to allocate memory for vid_dec_dev\n",
@@ -1587,6 +1609,9 @@ static int __init vid_dec_init(void)
 		goto error_vid_dec_cdev_add;
 	}
 	vid_dec_vcd_init();
+	if (switch_dev_register(&vdec_switch) < 0) {
+		printk(KERN_ERR "vdec: fail to register vdec switch!\n");
+	}
 	return 0;
 
 error_vid_dec_cdev_add:
@@ -1603,13 +1628,13 @@ error_vid_dec_alloc_chrdev_region:
 
 static void __exit vid_dec_exit(void)
 {
-	INFO("\n msm_vidc_dec: Inside %s()", __func__);
+	INFO("msm_vidc_dec: Inside %s()", __func__);
 	cdev_del(&(vid_dec_device_p->cdev));
 	device_destroy(vid_dec_class, vid_dec_dev_num);
 	class_destroy(vid_dec_class);
 	unregister_chrdev_region(vid_dec_dev_num, 1);
 	kfree(vid_dec_device_p);
-	INFO("\n msm_vidc_dec: Return from %s()", __func__);
+	INFO("msm_vidc_dec: Return from %s()", __func__);
 }
 
 MODULE_LICENSE("GPL v2");

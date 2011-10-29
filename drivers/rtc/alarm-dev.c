@@ -57,22 +57,47 @@ static uint32_t wait_pending;
 
 static struct alarm alarms[ANDROID_ALARM_TYPE_COUNT];
 
+#ifdef CONFIG_BUILD_CIQ
+static int is_set_cmd(unsigned int cmd)
+{
+	if ((ANDROID_ALARM_BASE_CMD(cmd) != ANDROID_ALARM_GET_TIME(0)) &&
+	    (ANDROID_ALARM_BASE_CMD(cmd) != ANDROID_ALARM_GET_TICKS(0)))
+		return 1;
+	return 0;
+}
+#else
+static int is_set_cmd(unsigned int cmd)
+{
+	if (ANDROID_ALARM_BASE_CMD(cmd) != ANDROID_ALARM_GET_TIME(0))
+		return 1;
+	return 0;
+}
+#endif
+
 static long alarm_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	int rv = 0;
 	unsigned long flags;
+	long long int tmp_ns;
+	struct timespec tmp;
 	struct timespec new_alarm_time;
 	struct timespec new_rtc_time;
 	struct timespec tmp_time;
+	static struct timespec prev_time = { 0, 0 };
 	enum android_alarm_type alarm_type = ANDROID_ALARM_IOCTL_TO_TYPE(cmd);
 	uint32_t alarm_type_mask = 1U << alarm_type;
 
 	if (alarm_type >= ANDROID_ALARM_TYPE_COUNT)
 		return -EINVAL;
 
-	if (ANDROID_ALARM_BASE_CMD(cmd) != ANDROID_ALARM_GET_TIME(0)) {
-		if ((file->f_flags & O_ACCMODE) == O_RDONLY)
+	if (is_set_cmd(cmd)) {
+		if ((file->f_flags & O_ACCMODE) == O_RDONLY) {
+			pr_alarm(INFO, "set cmd not permitted in %s cmd=%d type=%d\n"
+					, __FUNCTION__
+					, ANDROID_ALARM_BASE_CMD(cmd)
+					, alarm_type);
 			return -EPERM;
+		}
 		if (file->private_data == NULL &&
 		    cmd != ANDROID_ALARM_SET_RTC) {
 			spin_lock_irqsave(&alarm_slock, flags);
@@ -170,6 +195,20 @@ from_old_alarm_set:
 		case ANDROID_ALARM_ELAPSED_REALTIME:
 			tmp_time =
 				ktime_to_timespec(alarm_get_elapsed_realtime());
+			tmp = timespec_sub(tmp_time, prev_time);
+			tmp_ns = timespec_to_ns(&tmp);
+			if (tmp_ns >= 0) {
+				prev_time = tmp_time;
+			} else if (-tmp_ns < 100*1000000) {
+				/* (previous time - current time) < 100ms */
+				tmp_time = prev_time;
+			} else {
+				/* (previous time - current time) >= 100ms */
+				pr_alarm(INFO, "previous time=%lld > current time=%lld\n"
+						, timespec_to_ns(&prev_time)
+						, timespec_to_ns(&tmp_time));
+				tmp_time = prev_time;
+			}
 			break;
 		case ANDROID_ALARM_TYPE_COUNT:
 		case ANDROID_ALARM_SYSTEMTIME:
@@ -182,7 +221,16 @@ from_old_alarm_set:
 			goto err1;
 		}
 		break;
-
+#ifdef CONFIG_BUILD_CIQ
+	case ANDROID_ALARM_GET_TICKS(0):
+		alarm_get_elapsed_ticks(&tmp_time);
+		if (copy_to_user((void __user *)arg, &tmp_time,
+		    sizeof(tmp_time))) {
+			rv = -EFAULT;
+			goto err1;
+		}
+		break;
+#endif
 	default:
 		rv = -EINVAL;
 		goto err1;

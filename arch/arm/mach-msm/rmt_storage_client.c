@@ -30,6 +30,7 @@
 #include <linux/wakelock.h>
 #include <linux/rmt_storage_client.h>
 #include <linux/debugfs.h>
+#include <linux/slab.h>
 
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
@@ -45,6 +46,16 @@ enum {
 	RMT_STORAGE_EVNT_SEND_USER_DATA,
 	RMT_STORAGE_EVNT_READ_IOVEC,
 } rmt_storage_event;
+
+/*HTC : Move it here to avoid multiple definition*/
+enum {
+	RMT_STORAGE_NO_ERROR = 0,	/* Success */
+	RMT_STORAGE_ERROR_PARAM,	/* Invalid parameters */
+	RMT_STORAGE_ERROR_PIPE,		/* RPC pipe failure */
+	RMT_STORAGE_ERROR_UNINIT,	/* Server is not initalized */
+	RMT_STORAGE_ERROR_BUSY,		/* Device busy */
+	RMT_STORAGE_ERROR_DEVICE	/* Remote storage device */
+} rmt_storage_status;
 
 struct shared_ramfs_entry {
 	uint32_t client_id;   	/* Client id to uniquely identify a client */
@@ -704,6 +715,24 @@ static long rmt_storage_ioctl(struct file *fp, unsigned int cmd,
 	return ret;
 }
 
+int wait_final_call_process(void)
+{
+	/* 	the following code is for 8x60,
+		now 7x30 don't need this.		*/
+	#if 0
+	static int restart_process = 0;
+
+	if (restart_process)
+		return restart_process;
+	else if (rmc->final_call) {
+		restart_process = 1;
+	}
+	return rmc->final_call;
+	#endif
+
+	return 0;
+}
+
 void wait_rmt_final_call_back(int timeout)
 {
 	int rc;
@@ -1181,7 +1210,11 @@ static struct platform_driver rmt_storage_driver = {
 		since we need to backup NV before poweroff/reset */
 	.shutdown = NULL,
 	.driver	= {
+#ifdef CONFIG_ARCH_MSM8X60
+		.name 	= "rs00000000",
+#else
 		.name 	= "rs00000000:00000000",
+#endif
 		.owner	= THIS_MODULE,
 	},
 };
@@ -1190,8 +1223,11 @@ static int __init rmt_storage_init(void)
 {
 	snprintf((char *)rmt_storage_driver.driver.name,
 			strlen(rmt_storage_driver.driver.name)+1,
+#ifdef CONFIG_ARCH_MSM8X60
+			"rs%.8x", RMT_STORAGE_APIPROG);
+#else
 			"rs%.8x:%.8x", RMT_STORAGE_APIPROG, RMT_STORAGE_APIVERS);
-
+#endif
 	return platform_driver_register(&rmt_storage_driver);
 }
 

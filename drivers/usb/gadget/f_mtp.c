@@ -162,7 +162,6 @@ static struct usb_endpoint_descriptor mtp_fs_in_desc = {
 	.bDescriptorType        = USB_DT_ENDPOINT,
 	.bEndpointAddress       = USB_DIR_IN,
 	.bmAttributes           = USB_ENDPOINT_XFER_BULK,
-	.wMaxPacketSize         = __constant_cpu_to_le16(64),
 };
 
 static struct usb_endpoint_descriptor mtp_fs_out_desc = {
@@ -170,7 +169,6 @@ static struct usb_endpoint_descriptor mtp_fs_out_desc = {
 	.bDescriptorType        = USB_DT_ENDPOINT,
 	.bEndpointAddress       = USB_DIR_OUT,
 	.bmAttributes           = USB_ENDPOINT_XFER_BULK,
-	.wMaxPacketSize         = __constant_cpu_to_le16(64),
 };
 
 static struct usb_endpoint_descriptor mtp_fs_notify_desc = {
@@ -178,8 +176,8 @@ static struct usb_endpoint_descriptor mtp_fs_notify_desc = {
 	.bDescriptorType        = USB_DT_ENDPOINT,
 	.bEndpointAddress       = USB_DIR_IN,
 	.bmAttributes           = USB_ENDPOINT_XFER_INT,
-	.bInterval              = 32,
 	.wMaxPacketSize         = __constant_cpu_to_le16(64),
+	.bInterval              = 32,
 };
 
 static struct usb_descriptor_header *fs_mtp_descs[] = {
@@ -485,11 +483,19 @@ static ssize_t mtp_ctl_read(struct file *fp, char __user *buf,
 	struct usb_composite_dev *cdev;
 	int r = 0, n = 0, i;
 	unsigned long flags;
-	DBG(cdev, "%s\n", __func__);
+
+	printk(KERN_DEBUG "%s\n", __func__);
 	if (!dev)
 		return -EPERM;
 
+	if (dev->error) {
+		printk(KERN_ERR "%s: error, return -1\n", __func__);
+		return -EPERM;
+	}
+
 	cdev = dev->cdev;
+	DBG(cdev, "%s\n", __func__);
+
 	if (_lock(&dev->ctl_read_excl))
 		return -EBUSY;
 
@@ -511,7 +517,7 @@ wait_event:
 		}
 	}
 	spin_unlock_irqrestore(&dev->lock, flags);
-	if (i == NUM_EVENT)
+	if (i == NUM_EVENT && dev->online)
 		goto wait_event;
 
 	_unlock(&dev->ctl_read_excl);
@@ -553,17 +559,15 @@ static ssize_t mtp_event_write(struct file *fp, const char __user *buf,
 			 size_t count, loff_t *pos)
 {
 	struct mtp_dev *dev = fp->private_data;
-	struct usb_composite_dev *cdev;
+	struct usb_composite_dev *cdev = dev->cdev;
 	struct usb_request *req;
 	int r = count;
 	int ret;
 
 	DBG(cdev, "mtp_event_write(%d)\n", count);
 
-	if (!dev || !dev->cdev)
+	if (!dev)
 		return -EPERM;
-
-	cdev = dev->cdev;
 
 	req = dev->notify_req;
 	if (!req)
@@ -642,12 +646,12 @@ static ssize_t mtp_read(struct file *fp, char __user *buf,
 	int r = 0, xfer;
 	int ret;
 
-	DBG(cdev, "mtp_read(%d)\n", count);
-
 	if (!dev)
 		return -EPERM;
 
 	cdev = dev->cdev;
+	DBG(cdev, "mtp_read(%d)\n", count);
+
 	if (_lock(&dev->read_excl))
 		return -EBUSY;
 
@@ -767,12 +771,12 @@ static ssize_t mtp_write(struct file *fp, const char __user *buf,
 	int r = count, xfer;
 	int ret;
 
-	DBG(cdev, "mtp_write(%d)\n", count);
-
 	if (!dev)
 		return -EPERM;
 
 	cdev = dev->cdev;
+	DBG(cdev, "mtp_write(%d)\n", count);
+
 	if (_lock(&dev->write_excl))
 		return -EBUSY;
 
@@ -872,7 +876,7 @@ static struct miscdevice mtp_tunnel_device = {
 static int mtp_enable_open(struct inode *ip, struct file *fp)
 {
 	printk(KERN_INFO "enabling mtp\n");
-	android_switch_function(0x80);
+	/* framework HtcHardwareService will switch to MTP */
 	return 0;
 }
 
@@ -1086,6 +1090,31 @@ mtp_function_unbind(struct usb_configuration *c, struct usb_function *f)
 	_mtp_dev = NULL;
 }
 
+static void
+mtp_function_release(struct usb_configuration *c, struct usb_function *f)
+{
+	struct mtp_dev	*dev = func_to_dev(f);
+	struct usb_request *req;
+
+	if (dev->ep_in)
+		dev->ep_in->driver_data = NULL;
+	if (dev->ep_out)
+		dev->ep_out->driver_data = NULL;
+	if (dev->ep_notify)
+		dev->ep_notify->driver_data = NULL;
+	spin_lock_irq(&dev->lock);
+
+	mtp_request_free(dev->notify_req, dev->ep_notify);
+	while ((req = req_get(dev, &dev->tx_idle)))
+		mtp_request_free(req, dev->ep_in);
+	while ((req = req_get(dev, &dev->rx_idle)))
+		mtp_request_free(req, dev->ep_out);
+
+	dev->online = 0;
+	dev->error = 1;
+	spin_unlock_irq(&dev->lock);
+}
+
 static int mtp_function_set_alt(struct usb_function *f,
 		unsigned intf, unsigned alt)
 {
@@ -1122,6 +1151,7 @@ static int mtp_function_set_alt(struct usb_function *f,
 	dev->error = 0;
 	if (!dev->function.hidden)
 		dev->event = (1 << EVENT_ONLINE);
+	printk(KERN_INFO "%s: event=0x%04x\n", __func__, dev->event);
 
 	/* readers may be blocked waiting for us to go online */
 	wake_up(&dev->read_wq);
@@ -1133,10 +1163,14 @@ static void mtp_function_disable(struct usb_function *f)
 {
 	struct mtp_dev	*dev = func_to_dev(f);
 	struct usb_composite_dev	*cdev = dev->cdev;
+	int mtp_onlined = dev->online;
 
-	DBG(cdev, "mtp_function_disable (%d)\n", dev->online);
+	DBG(cdev, "%s mtp_function_disable (%d)\n",
+				dev->function.name, dev->online);
 	if (dev->online)
 		dev->event = (1 << EVENT_OFFLINE);
+	printk(KERN_INFO "%s: event=0x%04x\n", __func__, dev->event);
+
 	dev->online = 0;
 	dev->error = 1;
 	usb_ep_disable(dev->ep_in);
@@ -1144,9 +1178,12 @@ static void mtp_function_disable(struct usb_function *f)
 	usb_ep_disable(dev->ep_notify);
 
 	/* readers may be blocked waiting for us to go online */
-	wake_up(&dev->read_wq);
-	wake_up(&dev->notify_wq);
-	wake_up(&dev->ctl_read_wq);
+	if (mtp_onlined) {
+		printk(KERN_INFO "%s: wake up here\n", __func__);
+		wake_up(&dev->read_wq);
+		wake_up(&dev->notify_wq);
+		wake_up(&dev->ctl_read_wq);
+	}
 
 	VDBG(cdev, "%s disabled\n", dev->function.name);
 }
@@ -1197,6 +1234,7 @@ static int mtp_bind_config(struct usb_configuration *c)
 	dev->function.unbind = mtp_function_unbind;
 	dev->function.set_alt = mtp_function_set_alt;
 	dev->function.disable = mtp_function_disable;
+	dev->function.release = mtp_function_release;
 	dev->function.setup = mtp_setup;
 	dev->dev_status = STATUS_OK;
 

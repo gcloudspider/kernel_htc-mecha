@@ -25,8 +25,10 @@
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#if defined(CONFIG_QCT_LTE)
-#include <mach/lte/peripheral-loader.h>
+#if defined(CONFIG_ARCH_MSM7X30_LTE)
+#include <mach/7x30-lte/peripheral-loader.h>
+#elif defined(CONFIG_ARCH_MSM8X60)
+#include <mach/peripheral-loader-8x60.h>
 #endif
 
 #ifndef __MACH_PERIPHERAL_LOADER_H

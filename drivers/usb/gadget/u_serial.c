@@ -25,8 +25,10 @@
 #include <linux/delay.h>
 #include <linux/tty.h>
 #include <linux/tty_flip.h>
+#include <linux/slab.h>
 
 #include "u_serial.h"
+
 
 /*
  * This component encapsulates the TTY layer glue needed to provide basic
@@ -53,7 +55,7 @@
  * is managed in userspace ... OBEX, PTP, and MTP have been mentioned.
  */
 
-#define PREFIX	"ttyHSUSB"
+/* #define PREFIX	"ttyHSUSB" */
 
 /*
  * gserial is the lifecycle interface, used by USB functions
@@ -119,6 +121,7 @@ struct gs_port {
 
 	/* REVISIT this state ... */
 	struct usb_cdc_line_coding port_line_coding;	/* 8-N-1 etc */
+	int	rx_qcnt;
 };
 
 /* increase N_PORTS if you need more */
@@ -498,9 +501,7 @@ static void gs_rx_push(struct work_struct *work)
 
 	/* hand any queued data to the tty */
 	spin_lock_irq(&port->port_lock);
-
 	tty = port->port_tty;
-
 	while (!list_empty(queue)) {
 		struct usb_request	*req;
 
@@ -535,20 +536,21 @@ static void gs_rx_push(struct work_struct *work)
 				port->n_read += count;
 				if (MODEM_DEBUG_ON) {
 					printk("%d: rx block %d/%d\n",
-							port->port_num,
-							count, req->actual);
+						port->port_num,
+						count, req->actual);
 					list_move(&req->list, &port->read_pool);
-					break;
-				}
+			}
+				break;
 			}
 			port->n_read = 0;
 		}
 recycle:
 		list_move(&req->list, &port->read_pool);
+		port->rx_qcnt--;
 	}
 
-	/* Push from tty to ldisc; this is immediate with low_latency, and
-	 * may trigger callbacks to this driver ... so drop the spinlock.
+	/* Push from tty to ldisc; without low_latency set this is handled by
+	 * a workqueue, so we won't get callbacks and can hold port_lock
 	 */
 	if ((tty && do_push)) {
 		spin_unlock_irq(&port->port_lock);
@@ -608,9 +610,10 @@ static void gs_read_complete(struct usb_ep *ep, struct usb_request *req)
 			list_add_tail(&req->list, &port->read_queue);
 			queue_work(gs_tty_wq, &port->push_work);
 		} else {
-			printk("%s: TTY_THROTTLED\n", __func__);
+			printk("%s: TTY_THROTTLED, rx_qcnt: %d\n", __func__, port->rx_qcnt);
 			list_add_tail(&req->list, &port->read_queue);
 		}
+		port->rx_qcnt++;
 		spin_unlock(&port->port_lock);
 		break;
 	case -ESHUTDOWN:
@@ -656,7 +659,7 @@ static void gs_write_complete(struct usb_ep *ep, struct usb_request *req)
 	case 0:
 		/* normal completion */
 		if (port->port_usb)
-			gs_start_tx(port);
+		gs_start_tx(port);
 		break;
 
 	case -ESHUTDOWN:
@@ -844,7 +847,6 @@ static int gs_open(struct tty_struct *tty, struct file *file)
 	 * needing a workqueue schedule ... easier to keep up.
 	 */
 	tty->low_latency = 1;
-
 	/* if connected, start the I/O stream */
 	if (port->port_usb) {
 		struct gserial	*gser = port->port_usb;
@@ -934,7 +936,7 @@ static void gs_close(struct tty_struct *tty, struct file *file)
 	pr_debug("gs_close: ttyGS%d (%p,%p) done!\n",
 			port->port_num, tty, file);
 
-	wake_up(&port->close_wait);
+	wake_up_interruptible(&port->close_wait);
 exit:
 	spin_unlock_irq(&port->port_lock);
 }
@@ -1148,7 +1150,7 @@ static const struct tty_operations gs_tty_ops = {
 
 static struct tty_driver *gs_tty_driver;
 
-static int
+static int __init
 gs_port_alloc(unsigned port_num, struct usb_cdc_line_coding *coding)
 {
 	struct gs_port	*port;
@@ -1169,6 +1171,8 @@ gs_port_alloc(unsigned port_num, struct usb_cdc_line_coding *coding)
 
 	port->port_num = port_num;
 	port->port_line_coding = *coding;
+
+	port->rx_qcnt = 0;
 
 	ports[port_num].port = port;
 
@@ -1194,7 +1198,7 @@ gs_port_alloc(unsigned port_num, struct usb_cdc_line_coding *coding)
  *
  * Returns negative errno or zero.
  */
-int gserial_setup(struct usb_gadget *g, unsigned count)
+int __init gserial_setup(struct usb_gadget *g, unsigned count)
 {
 	unsigned			i;
 	struct usb_cdc_line_coding	coding;
@@ -1238,8 +1242,7 @@ int gserial_setup(struct usb_gadget *g, unsigned count)
 	gs_tty_driver->init_termios.c_lflag = 0;
 	gs_tty_driver->init_termios.c_iflag = 0;
 	gs_tty_driver->init_termios.c_oflag = 0;
-
-	coding.dwDTERate = __constant_cpu_to_le32(9600);
+	coding.dwDTERate = cpu_to_le32(9600);
 	coding.bCharFormat = 8;
 	coding.bParityType = USB_CDC_NO_PARITY;
 	coding.bDataBits = USB_CDC_1_STOP_BITS;
@@ -1450,6 +1453,7 @@ void gserial_disconnect(struct gserial *gser)
 
 	/* REVISIT as above: how best to track this? */
 	port->port_line_coding = gser->port_line_coding;
+
 	port->port_usb = NULL;
 	gser->ioport = NULL;
 #if 0

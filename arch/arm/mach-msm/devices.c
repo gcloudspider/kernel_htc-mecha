@@ -38,6 +38,7 @@
 #include <mach/msm_hsusb.h>
 #include <mach/msm_rpcrouter.h>
 #include <mach/msm_hsusb_hw.h>
+#include <linux/msm_rotator.h>
 #ifdef CONFIG_USB_FUNCTION
 #include <linux/usb/mass_storage_function.h>
 #endif
@@ -45,16 +46,11 @@
 #include <linux/mfd/pmic8058.h>
 #endif
 
-static char *df_serialno = "000000000000";
-static char *board_sn;
 int usb_phy_error;
 
 #define HSUSB_API_INIT_PHY_PROC	2
 #define HSUSB_API_PROG		0x30000064
 #define HSUSB_API_VERS MSM_RPC_VERS(1, 1)
-
-#define MFG_GPIO_TABLE_MAX_SIZE        0x400
-static unsigned char mfg_gpio_table[MFG_GPIO_TABLE_MAX_SIZE];
 
 static void internal_phy_reset(void)
 {
@@ -241,6 +237,7 @@ static int msm_hsusb_phy_caliberate(void __iomem *usb_base)
 	return msm_hsusb_phy_verify_access(usb_base);
 }
 
+#ifndef CONFIG_ARCH_8X60
 #define USB_LINK_RESET_TIMEOUT      (msecs_to_jiffies(10))
 void msm_hsusb_8x50_phy_reset(void)
 {
@@ -276,6 +273,7 @@ void msm_hsusb_8x50_phy_reset(void)
 
 	return;
 }
+#endif
 
 /* adjust eye diagram, disable vbusvalid interrupts */
 static int hsusb_phy_init_seq[] = { 0x1D, 0x0D, 0x1D, 0x10, -1 };
@@ -400,6 +398,7 @@ static struct platform_device usb_mass_storage_device = {
 };
 #endif
 
+#ifndef CONFIG_ARCH_MSM8X60
 static struct resource resources_hsusb[] = {
 	{
 		.start	= MSM_HSUSB_PHYS,
@@ -429,6 +428,56 @@ struct platform_device msm_device_hsusb = {
 	.dev		= {
 		.coherent_dma_mask	= 0xffffffff,
 		.platform_data = &msm_hsusb_pdata,
+	},
+};
+#endif
+
+static u64 dma_mask = 0xffffffffULL;
+static struct resource resources_otg[] = {
+	{
+		.start	= MSM_HSUSB_PHYS,
+		.end	= MSM_HSUSB_PHYS + MSM_HSUSB_SIZE,
+		.flags	= IORESOURCE_MEM,
+	},
+	{
+		.start	= INT_USB_OTG,
+		.end	= INT_USB_OTG,
+		.flags	= IORESOURCE_IRQ,
+	},
+};
+
+struct platform_device msm_device_otg = {
+	.name		= "msm_otg",
+	.id		= -1,
+	.num_resources	= ARRAY_SIZE(resources_otg),
+	.resource	= resources_otg,
+	.dev		= {
+		.dma_mask		= &dma_mask,
+		.coherent_dma_mask	= 0xffffffffULL,
+	},
+};
+
+static struct resource resources_hsusb_host[] = {
+	{
+		.start	= MSM_HSUSB_PHYS,
+		.end	= MSM_HSUSB_PHYS + MSM_HSUSB_SIZE,
+		.flags	= IORESOURCE_MEM,
+	},
+	{
+		.start	= INT_USB_HS,
+		.end	= INT_USB_HS,
+		.flags	= IORESOURCE_IRQ,
+	},
+};
+
+struct platform_device msm_device_hsusb_host = {
+	.name		= "msm_hsusb_host",
+	.id		= 0,
+	.num_resources	= ARRAY_SIZE(resources_hsusb_host),
+	.resource	= resources_hsusb_host,
+	.dev		= {
+		.dma_mask		= &dma_mask,
+		.coherent_dma_mask	= 0xffffffffULL,
 	},
 };
 
@@ -492,6 +541,7 @@ void __init msm_hsusb_set_product(struct msm_hsusb_product *product,
 }
 #endif
 
+#ifndef CONFIG_ARCH_MSM8X60
 static struct resource resources_uart1[] = {
 	{
 		.start	= INT_UART1,
@@ -637,6 +687,7 @@ struct platform_device msm_device_uart_dm2 = {
 		.coherent_dma_mask = DMA_BIT_MASK(32),
 	},
 };
+#endif
 
 #ifdef CONFIG_ARCH_MSM7X30
 static struct resource resources_i2c_2[] = {
@@ -839,6 +890,8 @@ void msm_set_i2c_mux(bool gpio, int *gpio_clk, int *gpio_dat, int clk_str, int d
 		msm_proc_comm(PCOM_RPC_GPIO_TLMM_CONFIG_EX, &id, 0);
 	}
 }
+
+#define MSM_NAND_PHYS		0xA0A00000
 
 struct flash_platform_data msm_nand_data = {
 	.parts		= NULL,
@@ -1301,12 +1354,40 @@ static struct resource resources_msm_rotator[] = {
 	},
 };
 
+static struct msm_rot_clocks rotator_clocks[] = {
+	{
+		.clk_name = "rotator_clk",
+		.clk_type = ROTATOR_AXICLK_CLK,
+		.clk_rate = 0,
+	},
+	{
+		.clk_name = "rotator_pclk",
+		.clk_type = ROTATOR_PCLK_CLK,
+		.clk_rate = 0,
+	},
+	{
+		.clk_name = "rotator_imem_clk",
+		.clk_type = ROTATOR_IMEMCLK_CLK,
+		.clk_rate = 0,
+	},
+};
+
+static struct msm_rotator_platform_data rotator_pdata = {
+	.number_of_clocks = ARRAY_SIZE(rotator_clocks),
+	.hardware_version_number = 0x1000303,
+	.rotator_clks = rotator_clocks,
+};
+
 struct platform_device msm_rotator_device = {
 	.name		= "msm_rotator",
 	.id		= 0,
 	.num_resources  = ARRAY_SIZE(resources_msm_rotator),
 	.resource       = resources_msm_rotator,
+	.dev = {
+		.platform_data = &rotator_pdata,
+	},
 };
+
 #endif
 
 #ifdef CONFIG_MSM_SSBI
@@ -1410,6 +1491,7 @@ struct clk msm_clocks[] = {
 	CLK_PCOM("camif_pad_pclk", CAMIF_PAD_P_CLK, NULL, OFF),
 	CLK_PCOM("codec_ssbi_clk", CODEC_SSBI_CLK, NULL, 0),
 	CLK_PCOM("ebi1_clk", EBI1_CLK, NULL, USE_MIN),
+	CLK_PCOM("ce_clk", CE_CLK, NULL, 0),
 	CLK_PCOM("ecodec_clk", ECODEC_CLK, NULL, 0),
 	CLK_PCOM("emdh_clk", EMDH_CLK, NULL, OFF | MINMAX),
 	CLK_PCOM("emdh_pclk", EMDH_P_CLK, NULL, OFF),
@@ -1444,6 +1526,8 @@ struct clk msm_clocks[] = {
 	CLK_PCOM("mi2s_codec_rx_s_clk", MI2S_CODEC_RX_S_CLK, NULL, 0),
 	CLK_PCOM("mi2s_codec_tx_m_clk", MI2S_CODEC_TX_M_CLK, NULL, 0),
 	CLK_PCOM("mi2s_codec_tx_s_clk", MI2S_CODEC_TX_S_CLK, NULL, 0),
+        CLK_PCOM("mi2s_m_clk", MI2S_HDMI_M_CLK, NULL, 0),
+        CLK_PCOM("mi2s_s_clk", MI2S_HDMI_CLK, NULL, 0),
 	CLK_PCOM("pbus_clk", PBUS_CLK, NULL, USE_MIN),
 	CLK_PCOM("pcm_clk", PCM_CLK, NULL, 0),
 	CLK_PCOM("qup_clk", QUP_I2C_CLK, &qup_device_i2c.dev, 0),
@@ -1494,175 +1578,3 @@ struct clk msm_clocks[] = {
 	CLOCK(NULL, 0, NULL, 0, 0),
 #endif
 };
-
-static int mfg_mode;
-int __init board_mfg_mode_init(char *s)
-{
-	if (!strcmp(s, "normal"))
-		mfg_mode = 0;
-	else if (!strcmp(s, "factory2"))
-		mfg_mode = 1;
-	else if (!strcmp(s, "recovery"))
-		mfg_mode = 2;
-	else if (!strcmp(s, "charge"))
-		mfg_mode = 3;
-	else if (!strcmp(s, "power_test"))
-		mfg_mode = 4;
-	else if (!strcmp(s, "offmode_charging"))
-		mfg_mode = 5;
-
-	return 1;
-}
-__setup("androidboot.mode=", board_mfg_mode_init);
-
-
-int board_mfg_mode(void)
-{
-	return mfg_mode;
-}
-
-EXPORT_SYMBOL(board_mfg_mode);
-
-static int __init board_serialno_setup(char *serialno)
-{
-	char *str;
-
-	/* use default serial number when mode is factory2 */
-	if (board_mfg_mode() == 1 || !strlen(serialno))
-		str = df_serialno;
-	else
-		str = serialno;
-#ifdef CONFIG_USB_FUNCTION
-	msm_hsusb_pdata.serial_number = str;
-#endif
-	board_sn = str;
-	return 1;
-}
-__setup("androidboot.serialno=", board_serialno_setup);
-
-char *board_serialno(void)
-{
-	return board_sn;
-}
-
-#define ATAG_SKUID 0x4d534D73
-int __init parse_tag_skuid(const struct tag *tags)
-{
-	int skuid = 0, find = 0;
-	struct tag *t = (struct tag *)tags;
-
-	for (; t->hdr.size; t = tag_next(t)) {
-		if (t->hdr.tag == ATAG_SKUID) {
-			printk(KERN_DEBUG "find the skuid tag\n");
-			find = 1;
-			break;
-		}
-	}
-
-	if (find)
-		skuid = t->u.revision.rev;
-	printk(KERN_DEBUG "parse_tag_skuid: hwid = 0x%x\n", skuid);
-	return skuid;
-}
-__tagtable(ATAG_SKUID, parse_tag_skuid);
-
-#define ATAG_HERO_PANEL_TYPE 0x4d534D74
-int panel_type;
-int __init tag_panel_parsing(const struct tag *tags)
-{
-	panel_type = tags->u.revision.rev;
-
-	printk(KERN_DEBUG "%s: panel type = %d\n", __func__,
-		panel_type);
-
-	return panel_type;
-}
-__tagtable(ATAG_HERO_PANEL_TYPE, tag_panel_parsing);
-
-#define ATAG_ENGINEERID 0x4d534D75
-unsigned engineer_id;
-int __init parse_tag_engineerid(const struct tag *tags)
-{
-	int engineerid = 0, find = 0;
-	struct tag *t = (struct tag *)tags;
-
-	for (; t->hdr.size; t = tag_next(t)) {
-		if (t->hdr.tag == ATAG_ENGINEERID) {
-			printk(KERN_DEBUG "find the engineer tag\n");
-			find = 1;
-			break;
-		}
-	}
-
-	if (find) {
-		engineer_id = t->u.revision.rev;
-		engineerid = t->u.revision.rev;
-	}
-	printk(KERN_DEBUG "parse_tag_engineerid: 0x%x\n", engineerid);
-	return engineerid;
-}
-__tagtable(ATAG_ENGINEERID, parse_tag_engineerid);
-
-#define ATAG_MFG_GPIO_TABLE 0x59504551
-int __init parse_tag_mfg_gpio_table(const struct tag *tags)
-{
-       unsigned char *dptr = (unsigned char *)(&tags->u);
-       __u32 size;
-
-       size = min((__u32)(tags->hdr.size - 2) * sizeof(__u32), (__u32)MFG_GPIO_TABLE_MAX_SIZE);
-       memcpy(mfg_gpio_table, dptr, size);
-       return 0;
-}
-__tagtable(ATAG_MFG_GPIO_TABLE, parse_tag_mfg_gpio_table);
-
-char * board_get_mfg_sleep_gpio_table(void)
-{
-        return mfg_gpio_table;
-}
-EXPORT_SYMBOL(board_get_mfg_sleep_gpio_table);
-
-static char *emmc_tag;
-static int __init board_set_emmc_tag(char *get_hboot_emmc)
-{
-	if (strlen(get_hboot_emmc))
-		emmc_tag = get_hboot_emmc;
-	else
-		emmc_tag = NULL;
-	return 1;
-}
-__setup("androidboot.emmc=", board_set_emmc_tag);
-
-int board_emmc_boot(void)
-{
-	if (emmc_tag) {
-		if (!strcmp(emmc_tag, "true"))
-			return 1;
-	}
-
-	return 0;
-}
-
-#define ATAG_MEMSIZE 0x5441001e
-unsigned memory_size;
-int __init parse_tag_memsize(const struct tag *tags)
-{
-	int mem_size = 0, find = 0;
-	struct tag *t = (struct tag *)tags;
-
-	for (; t->hdr.size; t = tag_next(t)) {
-		if (t->hdr.tag == ATAG_MEMSIZE) {
-			printk(KERN_DEBUG "find the memsize tag\n");
-			find = 1;
-			break;
-		}
-	}
-
-	if (find) {
-		memory_size = t->u.revision.rev;
-		mem_size = t->u.revision.rev;
-	}
-	printk(KERN_DEBUG "parse_tag_memsize: %d\n", memory_size);
-	return mem_size;
-}
-__tagtable(ATAG_MEMSIZE, parse_tag_memsize);
-

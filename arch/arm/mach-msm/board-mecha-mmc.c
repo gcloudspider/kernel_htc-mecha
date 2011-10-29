@@ -398,6 +398,7 @@ int __init mecha_init_mmc(unsigned int sys_rev)
 		printk(KERN_INFO "mecha: SD-Card interface disabled\n");
 		goto done;
 	}
+
 	vreg_sdslot = vreg_get(0, "gp10");
 	if (IS_ERR(vreg_sdslot))
 		return PTR_ERR(vreg_sdslot);

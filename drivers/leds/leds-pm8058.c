@@ -21,6 +21,8 @@
 #include <linux/pmic8058-pwm.h>
 #include <linux/delay.h>
 #include <linux/rtc.h>
+#include <linux/slab.h>
+#include <linux/wakelock.h>
 
 #define LED_ALM(x...) do { \
 struct timespec ts; \
@@ -33,9 +35,10 @@ ktime_to_ns(ktime_get()), tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, \
 tm.tm_hour, tm.tm_min, tm.tm_sec, ts.tv_nsec); \
 } while (0)
 
-/*static struct pw8058_pwm_config pwm_conf;*/
+/* static struct pw8058_pwm_config pwm_conf; */
 static struct workqueue_struct *g_led_work_queue;
 static int duties[64];
+struct wake_lock pmic_led_wake_lock;
 
 static int bank_to_id(int bank)
 {
@@ -64,10 +67,17 @@ static int bank_to_id(int bank)
 static void pwm_lut_delayed_fade_out(struct work_struct *work)
 {
 	struct pm8058_led_data *ldata;
-
+	int id, mode;
 	ldata = container_of(work, struct pm8058_led_data,
 			     led_delayed_work.work);
+	id = bank_to_id(ldata->bank);
+	mode = (id == PM_PWM_LED_KPD) ? PM_PWM_CONF_PWM1 :
+					PM_PWM_CONF_PWM1 + (ldata->bank - 4);
+	printk(KERN_INFO "%s +\n", __func__);
 	pm8058_pwm_lut_enable(ldata->pwm_led, 0);
+	pm8058_pwm_config_led(ldata->pwm_led, id, mode, 0);
+	wake_unlock(&pmic_led_wake_lock);
+	printk(KERN_INFO "%s -\n", __func__);
 }
 
 static void led_blink_do_work(struct work_struct *work)
@@ -77,9 +87,11 @@ static void led_blink_do_work(struct work_struct *work)
 	ldata = container_of(work, struct pm8058_led_data,
 			     led_delayed_work.work);
 
+	printk(KERN_INFO "%s +\n", __func__);
 	pwm_config(ldata->pwm_led, ldata->duty_time_ms * 1000,
 		   ldata->period_us);
 	pwm_enable(ldata->pwm_led);
+	printk(KERN_INFO "%s -\n", __func__);
 }
 
 static void led_work_func(struct work_struct *work)
@@ -87,8 +99,9 @@ static void led_work_func(struct work_struct *work)
 	struct pm8058_led_data *ldata;
 
 	ldata = container_of(work, struct pm8058_led_data, led_work);
-	LED_ALM("%s led alarm led work -" , ldata->ldev.name);
+	LED_ALM("%s led alarm led work +" , ldata->ldev.name);
 	pwm_disable(ldata->pwm_led);
+	LED_ALM("%s led alarm led work -" , ldata->ldev.name);
 }
 
 static void led_alarm_handler(struct alarm *alarm)
@@ -96,8 +109,9 @@ static void led_alarm_handler(struct alarm *alarm)
 	struct pm8058_led_data *ldata;
 
 	ldata = container_of(alarm, struct pm8058_led_data, led_alarm);
-	LED_ALM("%s led alarm trigger -", ldata->ldev.name);
+	LED_ALM("%s led alarm trigger +", ldata->ldev.name);
 	queue_work(g_led_work_queue, &ldata->led_work);
+	LED_ALM("%s led alarm trigger -", ldata->ldev.name);
 }
 
 static void pm8058_pwm_led_brightness_set(struct led_classdev *led_cdev,
@@ -112,7 +126,8 @@ static void pm8058_pwm_led_brightness_set(struct led_classdev *led_cdev,
 
 	brightness = (brightness > LED_FULL) ? LED_FULL : brightness;
 	brightness = (brightness < LED_OFF) ? LED_OFF : brightness;
-	printk(KERN_INFO "%s: %d\n", __func__, brightness);
+	printk(KERN_INFO "%s: bank %d brightness %d +\n", __func__,
+	       ldata->bank, brightness);
 
 	if (brightness) {
 		pwm_config(ldata->pwm_led, 64000, 64000);
@@ -127,6 +142,8 @@ static void pm8058_pwm_led_brightness_set(struct led_classdev *led_cdev,
 #endif
 		pwm_enable(ldata->pwm_led);
 	}
+	printk(KERN_INFO "%s: bank %d brightness %d -\n", __func__,
+	       ldata->bank, brightness);
 }
 
 static void pm8058_drvx_led_brightness_set(struct led_classdev *led_cdev,
@@ -138,6 +155,7 @@ static void pm8058_drvx_led_brightness_set(struct led_classdev *led_cdev,
 	int milliamps;
 
 	ldata = container_of(led_cdev, struct pm8058_led_data, ldev);
+
 	pwm_disable(ldata->pwm_led);
 	cancel_delayed_work_sync(&ldata->led_delayed_work);
 
@@ -147,7 +165,8 @@ static void pm8058_drvx_led_brightness_set(struct led_classdev *led_cdev,
 
 	brightness = (brightness > LED_FULL) ? LED_FULL : brightness;
 	brightness = (brightness < LED_OFF) ? LED_OFF : brightness;
-	printk(KERN_INFO "%s: %d\n", __func__, brightness);
+	printk(KERN_INFO "%s: bank %d brightness %d +\n", __func__,
+	       ldata->bank, brightness);
 
 	if (brightness) {
 		milliamps = (ldata->flags & PM8058_LED_DYNAMIC_BRIGHTNESS_EN) ?
@@ -172,29 +191,31 @@ static void pm8058_drvx_led_brightness_set(struct led_classdev *led_cdev,
 		}
 	} else {
 		if (ldata->flags & PM8058_LED_LTU_EN) {
-			if (ldata->flags & PM8058_LED_FADE_EN) {
-				pduties = &duties[ldata->start_index +
-						  ldata->duites_size];
-				pm8058_pwm_lut_config(ldata->pwm_led,
-						      ldata->period_us,
-						      pduties,
-						      ldata->duty_time_ms,
-						      ldata->start_index +
-						      ldata->duites_size,
-						      ldata->duites_size,
-						      0, 0,
-						      ldata->lut_flag);
-				pm8058_pwm_lut_enable(ldata->pwm_led, 1);
-				queue_delayed_work(g_led_work_queue,
-						   &ldata->led_delayed_work,
-						   msecs_to_jiffies(1000));
-				return;
-			}
-			pm8058_pwm_lut_enable(ldata->pwm_led, 0);
+			wake_lock(&pmic_led_wake_lock);
+			pduties = &duties[ldata->start_index +
+					  ldata->duites_size];
+			pm8058_pwm_lut_config(ldata->pwm_led,
+					      ldata->period_us,
+					      pduties,
+					      ldata->duty_time_ms,
+					      ldata->start_index +
+					      ldata->duites_size,
+					      ldata->duites_size,
+					      0, 0,
+					      ldata->lut_flag);
+			pm8058_pwm_lut_enable(ldata->pwm_led, 1);
+			queue_delayed_work(g_led_work_queue,
+					   &ldata->led_delayed_work,
+					   msecs_to_jiffies(ldata->duty_time_ms * ldata->duty_time_ms));
+
+			printk(KERN_INFO "%s: bank %d fade out brightness %d -\n", __func__,
+			ldata->bank, brightness);
+			return;
 		} else
 			pwm_disable(ldata->pwm_led);
 		pm8058_pwm_config_led(ldata->pwm_led, id, mode, 0);
 	}
+	printk(KERN_INFO "%s: bank %d brightness %d -\n", __func__, ldata->bank, brightness);
 }
 
 static ssize_t pm8058_led_blink_store(struct device *dev,
@@ -204,7 +225,6 @@ static ssize_t pm8058_led_blink_store(struct device *dev,
 	struct led_classdev *led_cdev;
 	struct pm8058_led_data *ldata;
 	int id, mode;
-	int milliamps;
 	int val;
 
 /*struct timespec ts1, ts2;*/
@@ -220,20 +240,28 @@ static ssize_t pm8058_led_blink_store(struct device *dev,
 	id = bank_to_id(ldata->bank);
 	mode = (id == PM_PWM_LED_KPD) ? PM_PWM_CONF_PWM1 :
 					PM_PWM_CONF_PWM1 + (ldata->bank - 4);
-	milliamps = (val > 0) ? ldata->out_current : 0;
 
 	if (ldata->flags & PM8058_LED_BLINK_EN)
-		pm8058_pwm_config_led(ldata->pwm_led, id, mode, milliamps);
+		pm8058_pwm_config_led(ldata->pwm_led, id, mode,
+				      ldata->out_current);
+
+	printk(KERN_INFO "%s: bank %d blink %d +\n", __func__, ldata->bank, val);
 
 	switch (val) {
 	case -1: /* stop flashing */
 		pwm_disable(ldata->pwm_led);
+		if (ldata->flags & PM8058_LED_BLINK_EN)
+			pm8058_pwm_config_led(ldata->pwm_led, id, mode, 0);
 		break;
 	case 0:
 		pwm_disable(ldata->pwm_led);
 		if (led_cdev->brightness) {
 			pwm_config(ldata->pwm_led, 64000, 64000);
 			pwm_enable(ldata->pwm_led);
+		} else {
+			if (ldata->flags & PM8058_LED_BLINK_EN)
+				pm8058_pwm_config_led(ldata->pwm_led, id,
+						      mode, 0);
 		}
 		break;
 	case 1:
@@ -272,9 +300,11 @@ static ssize_t pm8058_led_blink_store(struct device *dev,
 		pwm_enable(ldata->pwm_led);
 		break;
 	default:
+		printk(KERN_INFO "%s: bank %d blink %d -\n", __func__, ldata->bank, val);
 		return -EINVAL;
 	}
 
+	printk(KERN_INFO "%s: bank %d blink %d -\n", __func__, ldata->bank, val);
 	return count;
 }
 
@@ -320,8 +350,8 @@ static ssize_t pm8058_led_off_timer_store(struct device *dev,
 	led_cdev = (struct led_classdev *)dev_get_drvdata(dev);
 	ldata = container_of(led_cdev, struct pm8058_led_data, ldev);
 
-	/*printk(KERN_INFO "Setting %s off_timer to %d min %d sec\n",
-					   led_cdev->name, min, sec);*/
+	printk(KERN_INFO "Setting %s off_timer to %d min %d sec +\n",
+					   led_cdev->name, min, sec);
 
 	off_timer = min * 60 + sec;
 
@@ -333,12 +363,58 @@ static ssize_t pm8058_led_off_timer_store(struct device *dev,
 		alarm_start_range(&ldata->led_alarm, next_alarm, next_alarm);
 		LED_ALM("led alarm start -");
 	}
-
+	printk(KERN_INFO "Setting %s off_timer to %d min %d sec -\n",
+					   led_cdev->name, min, sec);
 	return count;
 }
 
 static DEVICE_ATTR(off_timer, 0644, pm8058_led_off_timer_show,
 				      pm8058_led_off_timer_store);
+
+static ssize_t pm8058_led_currents_show(struct device *dev,
+					struct device_attribute *attr,
+					char *buf)
+{
+	struct led_classdev *led_cdev;
+	struct pm8058_led_data *ldata;
+
+	led_cdev = (struct led_classdev *) dev_get_drvdata(dev);
+	ldata = container_of(led_cdev, struct pm8058_led_data, ldev);
+
+	return sprintf(buf, "%d\n", ldata->out_current);
+}
+
+static ssize_t pm8058_led_currents_store(struct device *dev,
+					 struct device_attribute *attr,
+					 const char *buf, size_t count)
+{
+	int currents = 0;
+	struct led_classdev *led_cdev;
+	struct pm8058_led_data *ldata;
+
+	sscanf(buf, "%d", &currents);
+	if (currents < 0)
+		return -EINVAL;
+
+	led_cdev = (struct led_classdev *)dev_get_drvdata(dev);
+	ldata = container_of(led_cdev, struct pm8058_led_data, ldev);
+
+	printk(KERN_INFO "%s: bank %d currents %d +\n", __func__, ldata->bank,
+	       currents);
+
+	ldata->out_current = currents;
+
+	ldata->ldev.brightness_set(led_cdev, 0);
+	if (currents)
+		ldata->ldev.brightness_set(led_cdev, 255);
+
+	printk(KERN_INFO "%s: bank %d currents %d -\n", __func__, ldata->bank,
+	       currents);
+	return count;
+}
+
+static DEVICE_ATTR(currents, 0644, pm8058_led_currents_show,
+		   pm8058_led_currents_store);
 
 static int pm8058_led_probe(struct platform_device *pdev)
 {
@@ -364,9 +440,12 @@ static int pm8058_led_probe(struct platform_device *pdev)
 
 	dev_set_drvdata(&pdev->dev, ldata);
 
+	wake_lock_init(&pmic_led_wake_lock, WAKE_LOCK_SUSPEND, "pmic_led");
+
 	g_led_work_queue = create_workqueue("led");
 	if (!g_led_work_queue)
 		goto err_create_work_queue;
+
 	for (i = 0; i < 64; i++)
 		duties[i] = pdata->duties[i];
 
@@ -460,23 +539,46 @@ static int pm8058_led_probe(struct platform_device *pdev)
 		}
 	}
 
+	for (i = 0; i < pdata->num_leds; i++) {
+		if (ldata[i].bank < 3)
+			continue;
+		ret = device_create_file(ldata[i].ldev.dev, &dev_attr_currents);
+		if (ret < 0) {
+			pr_err("%s: Failed to create attr blink [%d]\n",
+			       __func__, i);
+			goto err_register_attr_currents;
+		}
+	}
+
 	return 0;
 
+err_register_attr_currents:
+	for (i--; i >= 0; i--) {
+		if (ldata[i].bank < 3)
+			continue;
+		device_remove_file(ldata[i].ldev.dev, &dev_attr_currents);
+	}
+	i = pdata->num_leds;
 
 err_register_attr_off_timer:
 	for (i--; i >= 0; i--) {
-		if (pdata->led_config[i].type != PM8058_LED_RGB)
-			continue;
-		device_remove_file(ldata[i].ldev.dev, &dev_attr_off_timer);
+		if (pdata->led_config[i].type == PM8058_LED_RGB ||
+		    ldata[i].flags & PM8058_LED_BLINK_EN) {
+			device_remove_file(ldata[i].ldev.dev,
+					   &dev_attr_off_timer);
+		}
 	}
 	i = pdata->num_leds;
+
 err_register_attr_blink:
 	for (i--; i >= 0; i--) {
-		if (pdata->led_config[i].type != PM8058_LED_RGB)
-			continue;
-		device_remove_file(ldata[i].ldev.dev, &dev_attr_blink);
+		if (pdata->led_config[i].type == PM8058_LED_RGB ||
+		    ldata[i].flags & PM8058_LED_BLINK_EN) {
+			device_remove_file(ldata[i].ldev.dev, &dev_attr_blink);
+		}
 	}
 	i = pdata->num_leds;
+
 err_register_led_cdev:
 	for (i--; i >= 0; i--) {
 		switch (pdata->led_config[i].type) {
@@ -489,9 +591,12 @@ err_register_led_cdev:
 		led_classdev_unregister(&ldata[i].ldev);
 	}
 	destroy_workqueue(g_led_work_queue);
+
 err_create_work_queue:
 	kfree(ldata);
+
 err_exit:
+	wake_lock_destroy(&pmic_led_wake_lock);
 	return ret;
 }
 
@@ -508,10 +613,6 @@ static int __devexit pm8058_led_remove(struct platform_device *pdev)
 		led_classdev_unregister(&ldata[i].ldev);
 		switch (pdata->led_config[i].type) {
 		case PM8058_LED_RGB:
-			device_remove_file(ldata[i].ldev.dev,
-					    &dev_attr_blink);
-			device_remove_file(ldata[i].ldev.dev,
-					    &dev_attr_off_timer);
 			pwm_free(ldata[i].pwm_led);
 			break;
 		case PM8058_LED_PWM:
@@ -519,10 +620,24 @@ static int __devexit pm8058_led_remove(struct platform_device *pdev)
 			pwm_free(ldata[i].pwm_led);
 			break;
 		}
+
+		if (pdata->led_config[i].type == PM8058_LED_RGB ||
+		    ldata[i].flags & PM8058_LED_BLINK_EN) {
+			device_remove_file(ldata[i].ldev.dev,
+					   &dev_attr_blink);
+			device_remove_file(ldata[i].ldev.dev,
+					   &dev_attr_off_timer);
+		}
+
+		if (ldata[i].bank >= 3)
+			device_remove_file(ldata[i].ldev.dev,
+					   &dev_attr_currents);
 	}
 
+	wake_lock_destroy(&pmic_led_wake_lock);
 	destroy_workqueue(g_led_work_queue);
 	kfree(ldata);
+
 	return 0;
 }
 

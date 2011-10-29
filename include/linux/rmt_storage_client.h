@@ -42,15 +42,6 @@
 #define RMT_STORAGE_MAX_IOVEC_XFR_CNT 5
 #define MAX_NUM_CLIENTS 10
 
-enum {
-	RMT_STORAGE_NO_ERROR = 0,	/* Success */
-	RMT_STORAGE_ERROR_PARAM,	/* Invalid parameters */
-	RMT_STORAGE_ERROR_PIPE,		/* RPC pipe failure */
-	RMT_STORAGE_ERROR_UNINIT,	/* Server is not initalized */
-	RMT_STORAGE_ERROR_BUSY,		/* Device busy */
-	RMT_STORAGE_ERROR_DEVICE	/* Remote storage device */
-} rmt_storage_status;
-
 struct rmt_storage_iovec_desc {
 	uint32_t sector_addr;
 	uint32_t data_phy_addr;
@@ -71,7 +62,7 @@ struct rmt_storage_send_sts {
 	uint32_t err_code;
 	uint32_t data;
 	uint32_t handle;
-#ifdef CONFIG_MSM_RMT_STORAGE_CLIENT_STATS
+#if defined(CONFIG_MSM_RMT_STORAGE_CLIENT_STATS) || defined(CONFIG_ARCH_MSM8X60)
 	uint32_t xfer_dir;
 #endif
 };

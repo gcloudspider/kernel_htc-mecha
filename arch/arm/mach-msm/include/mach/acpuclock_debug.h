@@ -25,6 +25,7 @@ struct acpuclock_debug_dev {
 	int (*get_pwrc_ramp_down) (void);
 	unsigned int (*get_current_vdd) (void);
 	int (*update_freq_tbl) (unsigned int acpu_khz, unsigned int acpu_vdd);
+	struct clkctl_acpu_speed *(*get_freq_tbl)(void);
 };
 
 #ifndef CONFIG_ACPUCLOCK_DEBUG

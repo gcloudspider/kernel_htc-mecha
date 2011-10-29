@@ -390,7 +390,7 @@ extern void dhd_wait_event_wakeup(dhd_pub_t*dhd);
 
 #ifdef WLAN_PFN
 #define MAX_PFN_NUMBER	2
-#define PFN_SCAN_FREQ	60 /* in secs */
+#define PFN_SCAN_FREQ	300 /* in secs */
 #define PFN_WAKE_TIME	20000	/* in mini secs */
 int dhd_set_pfn_ssid(char * ssid, int ssid_len);
 int dhd_del_pfn_ssid(char * ssid, int ssid_len);

@@ -20,7 +20,15 @@
 #ifdef CONFIG_VMSPLIT_2G
 #define VMALLOC_END	  (PAGE_OFFSET + 0x60000000)
 #else
-#define VMALLOC_END	  (0xF8000000)
+#ifdef CONFIG_ARCH_MSM8X60
+#define VMALLOC_END	  (PAGE_OFFSET + 0x3A000000)
+#else
+#ifdef CONFIG_DEBUG_LL
+#define VMALLOC_END	  (0xFD800000)
+#else
+#define VMALLOC_END	  (0xFE000000)
+#endif
+#endif
 #endif
 
 #endif

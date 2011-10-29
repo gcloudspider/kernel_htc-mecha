@@ -1037,6 +1037,7 @@ static struct msm_lcdc_panel_ops mecha_auo_panel_ops = {
 	.blank		= mecha_auo_panel_blank,
 	.unblank	= mecha_auo_panel_unblank,
 };
+
 #ifdef CONFIG_PANEL_SELF_REFRESH
 static struct msm_lcdc_timing mecha_auo_timing = {
 	.clk_rate		= 24576000,
@@ -1066,6 +1067,7 @@ static struct msm_lcdc_timing mecha_auo_timing = {
 	.den_act_low		= 0,
 };
 #endif
+
 /*----------------------------------------------------------------------------*/
 
 #define LCM_CMD(_cmd, ...)                                      \

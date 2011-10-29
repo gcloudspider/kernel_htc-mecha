@@ -354,9 +354,6 @@ static int lcm_write_cmd(uint32_t reg, uint32_t data)
 {
 	int ret = -1;
 
-	if (reg < 0)
-		return -EIO;
-
 	ret = qspi_send(0x0, reg);
 	if (ret)
 		goto err_lcm_writeb;
@@ -632,7 +629,7 @@ static int __init amoled_init_panel(void)
 	return 0;
 }
 
-static int __init amoled_probe(struct platform_device *pdev)
+static int amoled_probe(struct platform_device *pdev)
 {
 	int rc = -EIO;
 	struct panel_platform_data *pdata;

@@ -80,6 +80,7 @@
 #include <linux/pwm.h>
 #include <linux/mfd/pmic8058.h>
 #include <linux/pmic8058-pwm.h>
+#include <linux/slab.h>
 
 #define	PM8058_LPG_BANKS		8
 #define	PM8058_PWM_CHANNELS		PM8058_LPG_BANKS	/* MAX=8 */

@@ -54,7 +54,7 @@ static void do_sysrq(struct kdbg_ctxt *ctxt, char rq)
 	int ret;
 	int idx = 0;
 	do_syslog(5 /* clear */, NULL, 0);
-	__handle_sysrq(rq, NULL, 0);
+	handle_sysrq(rq, NULL);
 	while (1) {
 		ret = log_buf_copy(buf, idx, sizeof(buf) - 1);
 		if (ret <= 0)
@@ -65,33 +65,8 @@ static void do_sysrq(struct kdbg_ctxt *ctxt, char rq)
 	}
 }
 
-static char debug_all_table[]={
-#ifdef CONFIG_LOCKDEP
-	'd', /*showlocks*/
-#endif
-#ifdef CONFIG_SMP
-	'l', /*showallcpus*/
-#endif
-	'm', /*showmem*/
-	'p', /*showregs*/
-	'q', /*showtimers*/
-	't', /*showstate*/
-#ifdef CONFIG_TRACING
-	'z', /*ftrace_dump*/
-#endif
-};
-
 int kernel_debugger(struct kdbg_ctxt *ctxt, char *cmd)
 {
-	int i = 0;
-	if(!strcmp(cmd, "all")){
-		dprintf("[ps]\n");
-		do_ps(ctxt);
-		for (i = 0; i < ARRAY_SIZE(debug_all_table); i++) {
-			dprintf("\n");
-			do_sysrq(ctxt, debug_all_table[i]);
-		}
-	}
 	if (!strcmp(cmd, "ps"))
 		do_ps(ctxt);
 	if (!strcmp(cmd, "sysrq"))

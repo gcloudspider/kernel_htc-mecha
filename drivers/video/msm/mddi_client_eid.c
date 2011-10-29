@@ -26,12 +26,15 @@
 #include <linux/kthread.h>
 #include <linux/wakelock.h>
 #include <linux/clk.h>
+#include <linux/slab.h>
 #include <asm/atomic.h>
 #include <asm/mach-types.h>
 #include <mach/msm_fb.h>
 #include <mach/msm_iomap.h>
 #include <mach/msm_panel.h>
+#include <mach/panel_id.h>
 #include "mddi_client_eid.h"
+#include <mach/debug_display.h>
 
 #if 0
 #define B(s...) printk(s)
@@ -54,6 +57,8 @@ enum {
 	PANEL_LIBERTY_TPO,
 	PANEL_LIBERTY_EID_24pin,
 	PANEL_EIDII,
+	PANEL_ICON_G_SHARP,
+	PANEL_CHACHA_AUO,
 	PANEL_UNKNOWN,
 };
 
@@ -85,14 +90,14 @@ static struct platform_device mddi_samsung_cabc = {
 };
 
 static struct clk *ebi1_clk;
+#if !defined(CONFIG_ARCH_MSM7X30)
 static void samsung_dump_vsync(void)
 {
-	printk(KERN_INFO "STATUS %d %s EBI1 %lu\n",
+	PR_DISP_INFO("STATUS %d %s EBI1 %lu\n",
 		readl(VSYNC_STATUS) & 0x04,
 		readl(VSYNC_EN) & 0x04 ? "ENABLED" : "DISABLED",
 		clk_get_rate(ebi1_clk));
 }
-
 static inline void samsung_clear_vsync(void)
 {
 	unsigned val;
@@ -107,8 +112,9 @@ static inline void samsung_clear_vsync(void)
 	}
 
 	if (retry == 0)
-		printk(KERN_ERR "%s: clear vsync failed!\n", __func__);
+		PR_DISP_ERR("%s: clear vsync failed!\n", __func__);
 }
+#endif
 
 static void
 samsung_request_vsync(struct msm_panel_data *panel_data,
@@ -126,8 +132,12 @@ samsung_request_vsync(struct msm_panel_data *panel_data,
 	
 	if (atomic_read(&panel->depth) <= 0) {
 		atomic_inc(&panel->depth);
+#if defined(CONFIG_ARCH_MSM7X30)
+		enable_irq(gpio_to_irq(30));
+#else
 		samsung_clear_vsync();
 		enable_irq(gpio_to_irq(97));
+#endif
 	}
 }
 
@@ -144,7 +154,7 @@ static void samsung_wait_vsync(struct msm_panel_data *panel_data)
 
 	if (wait_event_timeout(samsung_vsync_wait, panel->samsung_got_int,
 			       HZ / 2) == 0)
-		printk(KERN_ERR "timeout waiting for VSYNC\n");
+		PR_DISP_ERR("timeout waiting for VSYNC\n");
 
 	panel->samsung_got_int = 0;
 	/* interrupt clears when screen dma starts */
@@ -171,7 +181,8 @@ eid_pwrctl(struct msm_mddi_client_data *client_data, int panel_type,
 		prm[7] = 0x38;
 	} else if ((panel_type == PANEL_TPO) ||
 		   (panel_type == PANEL_HEROC_TPO) ||
-                   (panel_type == PANEL_ESPRESSO_TPO)) {
+                   (panel_type == PANEL_ESPRESSO_TPO) ||
+		   (panel_type == PANEL_ID_ICN_TPO)) {
 		prm[5] = 0x33;
 		prm[6] = 0x75;
 		prm[7] = 0x75;
@@ -191,10 +202,10 @@ eid_pwrctl(struct msm_mddi_client_data *client_data, int panel_type,
 
 	client_data->remote_write_vals(client_data, prm, PWRCTL, 12);
 #if DEBUG_EID_CMD
-	printk(KERN_DEBUG "0x%x ", PWRCTL);
+	PR_DISP_DEBUG("0x%x ", PWRCTL);
 	for (i = 0; i < 12; i++)
-		printk("0x%x ", prm[i]);
-	printk("\n");
+		PR_DISP_WARN(("0x%x ", prm[i]);
+	PR_DISP_WARN(("\n");
 #endif
 }
 
@@ -220,10 +231,10 @@ eid_cmd(struct msm_mddi_client_data *client_data, unsigned cmd,
 
 	va_end(attr_list);
 #if DEBUG_EID_CMD
-	printk(KERN_DEBUG "0x%x ", cmd);
+	PR_DISP_DEBUG("0x%x ", cmd);
 	for (i = 0; i < size; i++)
-		printk("0x%x ", prm[i]);
-	printk("\n");
+		PR_DISP_WARN(("0x%x ", prm[i]);
+	PR_DISP_WARN(("\n");
 #endif
 	client_data->remote_write_vals(client_data, prm, cmd, size);
 }
@@ -236,11 +247,44 @@ eid_client_init(struct msm_mddi_bridge_platform_data *bridge,
 	struct panel_data *panel = &bridge->panel_conf;
 
 #if DEBUG_EID_CMD
-	printk(KERN_DEBUG "%s: enter.\n", __func__);
+	PR_DISP_DEBUG("%s: enter.\n", __func__);
 #endif
 	client_data->auto_hibernate(client_data, 0);
 
-	if (panel->panel_id == PANEL_ESPRESSO_SHARP) {
+	if (panel->panel_id == PANEL_ICON_G_SHARP) {
+		eid_cmd(client_data, 0xef, prm, 4, 0x00, 0x00, 0x00, 0x00);
+		eid_cmd(client_data, 0xf2, prm, 12, 0x14, 0x14, 0x0f, 0x1b,
+			0x07, 0x1b, 0x07, 0x12, 0x00, 0x18, 0x18, 0x00);
+		eid_cmd(client_data, 0xf6, prm, 4, 0x80, 0x10, 0x09, 0x00);
+		eid_cmd(client_data, 0xfd, prm, 4, 0x33, 0x3b, 0x00, 0x00);
+		eid_cmd(client_data, 0x2a, prm, 4, 0x00, 0x00, 0x01, 0x3f);
+		eid_cmd(client_data, 0x2b, prm, 4, 0x00, 0x00, 0x01, 0xdf);
+		eid_cmd(client_data, 0x36, prm, 4, 0x40, 0x00, 0x00, 0x00);
+		eid_cmd(client_data, 0x3a, prm, 4, 0x55, 0x00, 0x00, 0x00);
+		eid_cmd(client_data, 0xe0, prm, 4, 0x00, 0x00, 0x00, 0x00);
+		eid_cmd(client_data, 0xe1, prm, 4, 0x00, 0x00, 0x00, 0x00);
+		eid_cmd(client_data, 0x35, prm, 4, 0x00, 0x00, 0x00, 0x00);
+		eid_cmd(client_data, 0xf7, prm, 16, 0x08, 0x2e, 0x00, 0x2a,
+			0x38, 0x3a, 0x35, 0x36, 0x07, 0x05, 0x06, 0x0c, 0x00,
+			0x14, 0x14, 0x00);
+		eid_cmd(client_data, 0xf8, prm, 16, 0x17, 0x13, 0x00, 0x0b,
+			0x13, 0x1e, 0x23, 0x25, 0x18, 0x1f, 0x2a, 0x28, 0x00,
+			0x14, 0x14, 0x00);
+		eid_cmd(client_data, 0xf3, prm, 12, 0x01, 0x00, 0x26, 0x26,
+			0x08, 0x33, 0x6D, 0x6D, 0x00, 0x00, 0x00, 0x00);
+		eid_cmd(client_data, 0xf4, prm, 8, 0x4d, 0x4d, 0x5e, 0x5e, 0x77,
+			0x00, 0x00, 0x00);
+		eid_cmd(client_data, 0xf5, prm, 8, 0x03, 0x11, 0x06, 0x00, 0x00,
+			0x1f, 0x00, 0x00);
+		eid_cmd(client_data, 0x11, prm, 4, 0x00, 0x00, 0x00, 0x00);
+		hr_msleep(160);
+		eid_cmd(client_data, 0x29, prm, 4, 0x00, 0x00, 0x00, 0x00);
+
+		client_data->auto_hibernate(client_data, 1);
+		return 0;
+	}
+
+	if (panel->panel_id == PANEL_ESPRESSO_SHARP || panel->panel_id == PANEL_ID_ICN_SHARP) {
 		eid_cmd(client_data, DCON, prm, 4, 0x00, 0x00, 0x00, 0x00);
 		eid_cmd(client_data, DISCTL, prm, 12, 0x14, 0x14, 0x0f, 0x1b, 0x07,
 			0x1b, 0x07, 0x12, 0x02, 0x18, 0x18, 0x00);
@@ -252,9 +296,10 @@ eid_client_init(struct msm_mddi_bridge_platform_data *bridge,
 		eid_cmd(client_data, CASET, prm, 4, 0x00, 0x00, 0x01, 0x3f);
 
 		eid_cmd(client_data, PASET, prm, 4, 0x00, 0x00, 0x01, 0xdf);
-
-		eid_cmd(client_data, MADCTL, prm, 4, 0x00, 0x00, 0x00, 0x00);
-
+		if(panel->panel_id == PANEL_ID_ICN_SHARP)
+			eid_cmd(client_data, MADCTL, prm, 4, 0xC0, 0x00, 0x00, 0x00);
+		else
+			eid_cmd(client_data, MADCTL, prm, 4, 0x00, 0x00, 0x00, 0x00);
 		eid_cmd(client_data, COLMOD, prm, 4, 0x55, 0x00, 0x00, 0x00);
 
 		eid_cmd(client_data, MDDICTL, prm, 4, 0x00, 0x00, 0x00, 0x00);
@@ -288,17 +333,16 @@ eid_client_init(struct msm_mddi_bridge_platform_data *bridge,
 		client_data->auto_hibernate(client_data, 1);
 		return 0;
 	}
-
-	if (panel->panel_id != PANEL_ESPRESSO_TPO)
+	if (panel->panel_id != PANEL_ESPRESSO_TPO || panel->panel_id != PANEL_ID_ICN_TPO)
                 eid_pwrctl(client_data, panel->panel_id, 0x00, 0x00);
         else
                 eid_cmd(client_data, 0xF3, prm, 12, 0x01, 0x00, 0x2a, 0x00,
                         0x09, 0x33, 0x75, 0x75, 0x00, 0x00, 0x00, 0x00);
 
-	if (panel->panel_id != PANEL_ESPRESSO_TPO)
+	if (panel->panel_id != PANEL_ESPRESSO_TPO || panel->panel_id != PANEL_ID_ICN_TPO)
 	       eid_cmd(client_data, SLPOUT, prm, 4, 0x00, 0x00, 0x00, 0x00);
 
-	if (panel->panel_id == PANEL_ESPRESSO_TPO) {
+	if (panel->panel_id == PANEL_ESPRESSO_TPO || panel->panel_id == PANEL_ID_ICN_TPO) {
 		eid_cmd(client_data, DISCTL, prm, 12, 0x16, 0x16, 0x0f, 0x1b,
 			0x07, 0x1b, 0x07, 0x10, 0x02, 0x16, 0x16, 0x00);
 	} else if (panel->panel_id == PANEL_LIBERTY_EID_24pin) {
@@ -315,7 +359,7 @@ eid_client_init(struct msm_mddi_bridge_platform_data *bridge,
 			0x11, 0x11, 0x11, 0x10, 0x00, 0x16, 0x16, 0x00);
 	}
 
-	if (panel->panel_id != PANEL_ESPRESSO_TPO)
+	if (panel->panel_id != PANEL_ESPRESSO_TPO || panel->panel_id != PANEL_ID_ICN_TPO)
                 eid_pwrctl(client_data, panel->panel_id, 0x01, 0x00);
 
 	if (panel->panel_id == PANEL_EID_40pin)
@@ -325,7 +369,7 @@ eid_client_init(struct msm_mddi_bridge_platform_data *bridge,
 		(panel->panel_id == PANEL_HEROC_TPO))
 		eid_cmd(client_data, VCMCTL, prm, 8, 0x60, 0x60, 0x7f, 0x7f,
 			0x77, 0x00, 0x00, 0x00);
-	else if (panel->panel_id == PANEL_ESPRESSO_TPO)
+	else if (panel->panel_id == PANEL_ESPRESSO_TPO || panel->panel_id == PANEL_ID_ICN_TPO)
 		eid_cmd(client_data, VCMCTL, prm, 8, 0x50, 0x50, 0x7f, 0x7f,
 			0x77, 0x00, 0x00, 0x00);
 	else if (panel->panel_id == PANEL_LIBERTY_EID_24pin)
@@ -343,7 +387,8 @@ eid_client_init(struct msm_mddi_bridge_platform_data *bridge,
 		eid_cmd(client_data, SRCCTL, prm, 8, 0x12, 0x00, 0x06, 0x01,
 			0x01, 0x1d, 0x00, 0x00);
 	else if ((panel->panel_id == PANEL_ESPRESSO_TPO) ||
-	        (panel->panel_id == PANEL_LIBERTY_TPO))
+	        (panel->panel_id == PANEL_LIBERTY_TPO) ||
+		(panel->panel_id == PANEL_ID_ICN_TPO))
 		eid_cmd(client_data, SRCCTL, prm, 8, 0x12, 0x00, 0x03, 0x01,
                         0x01, 0x1d, 0x00, 0x00);
 	else
@@ -352,7 +397,8 @@ eid_client_init(struct msm_mddi_bridge_platform_data *bridge,
 	if ((panel->panel_id == PANEL_TPO) ||
 	    (panel->panel_id == PANEL_HEROC_TPO) ||
 	    (panel->panel_id == PANEL_LIBERTY_TPO) ||
-            (panel->panel_id == PANEL_ESPRESSO_TPO))
+            (panel->panel_id == PANEL_ESPRESSO_TPO) ||
+	    (panel->panel_id == PANEL_ID_ICN_TPO))
 		eid_cmd(client_data, GATECTL, prm, 4, 0x11, 0x3b, 0x00, 0x00);
 	else
 	        eid_cmd(client_data, GATECTL, prm, 4, 0x44, 0x3b, 0x00, 0x00);
@@ -376,7 +422,7 @@ eid_client_init(struct msm_mddi_bridge_platform_data *bridge,
 
 	        eid_pwrctl(client_data, panel->panel_id, 0x7f, 0x08);
 	        hr_msleep(30);
-        } else if (panel->panel_id != PANEL_ESPRESSO_TPO) {
+        } else if (panel->panel_id != PANEL_ESPRESSO_TPO || panel->panel_id != PANEL_ID_ICN_TPO) {
 		hr_msleep(20);
                 eid_pwrctl(client_data, panel->panel_id, 0x03, 0x00);
 	        hr_msleep(20);
@@ -403,8 +449,11 @@ eid_client_init(struct msm_mddi_bridge_platform_data *bridge,
 	    (panel->panel_id == PANEL_TPO) ||
 	    (panel->panel_id == PANEL_HEROC_TPO))
 		eid_cmd(client_data, MADCTL, prm, 4, 0x48, 0x00, 0x00, 0x00);
-	else if (panel->panel_id == PANEL_ESPRESSO_TPO)
-		eid_cmd(client_data, MADCTL, prm, 4, 0x08, 0x00, 0x00, 0x00);
+	else if (panel->panel_id == PANEL_ESPRESSO_TPO || panel->panel_id == PANEL_ID_ICN_TPO)
+		if (panel->panel_id == PANEL_ID_ICN_TPO)
+			eid_cmd(client_data, MADCTL, prm, 4, 0xC8, 0x00, 0x00, 0x00);
+		else
+			eid_cmd(client_data, MADCTL, prm, 4, 0x08, 0x00, 0x00, 0x00);
 	else if ((panel->panel_id == PANEL_LIBERTY_EID_24pin) ||
 		(panel->panel_id == PANEL_LIBERTY_TPO))
 		eid_cmd(client_data, MADCTL, prm, 4, 0x48, 0x00, 0x00, 0x00);
@@ -414,7 +463,8 @@ eid_client_init(struct msm_mddi_bridge_platform_data *bridge,
             (panel->panel_id == PANEL_HEROC_EID_BOTTOM) ||
             (panel->panel_id == PANEL_ESPRESSO_TPO) ||
             (panel->panel_id == PANEL_LIBERTY_EID_24pin) ||
-            (panel->panel_id == PANEL_LIBERTY_TPO))
+            (panel->panel_id == PANEL_LIBERTY_TPO) ||
+	    (panel->panel_id == PANEL_ID_ICN_TPO))
 		eid_cmd(client_data, COLMOD, prm, 4, 0x55, 0x00, 0x00, 0x00);
 	else
 		eid_cmd(client_data, COLMOD, prm, 4, 0x66, 0x00, 0x00, 0x00);
@@ -448,7 +498,7 @@ eid_client_init(struct msm_mddi_bridge_platform_data *bridge,
 			0x0b, 0x22, 0x22, 0x00);
 		eid_cmd(client_data, BCMODE, prm, 4, 0x02, 0x00, 0x00, 0x00);
 		eid_cmd(client_data, WRCABC, prm, 4, 0x00, 0x00, 0x00, 0x00);
-         } else if (panel->panel_id == PANEL_ESPRESSO_TPO) {
+         } else if (panel->panel_id == PANEL_ESPRESSO_TPO || panel->panel_id == PANEL_ID_ICN_TPO) {
                 eid_cmd(client_data, GAMCTL1, prm, 16, 0x80, 0x0a, 0x00, 0x18,
                         0x32, 0x2f, 0x2a, 0x28, 0x13, 0x12, 0x14, 0x18,
                         0x06, 0x22, 0x22, 0x00);
@@ -538,20 +588,21 @@ eid_client_init(struct msm_mddi_bridge_platform_data *bridge,
 	}
 	eid_cmd(client_data, CASET, prm, 4, 0x00, 0x00, 0x01, 0x3f);
 	eid_cmd(client_data, PASET, prm, 4, 0x00, 0x00, 0x01, 0xdf);
-	if (panel->panel_id == PANEL_ESPRESSO_TPO)
+	if (panel->panel_id == PANEL_ESPRESSO_TPO || panel->panel_id == PANEL_ID_ICN_TPO)
 		eid_cmd(client_data, DCON, prm, 4, 0x00, 0x00, 0x00, 0x00);
 	else
 		eid_cmd(client_data, DCON, prm, 4, 0x06, 0x00, 0x00, 0x00);
 	eid_cmd(client_data, RAMWR, prm, 4, 0x00, 0x00, 0x00, 0x00);
 	if ((panel->panel_id == PANEL_ESPRESSO_TPO) ||
-	    (panel->panel_id == PANEL_LIBERTY_TPO))
+	    (panel->panel_id == PANEL_LIBERTY_TPO) ||
+	    (panel->panel_id == PANEL_ID_ICN_TPO))
 		hr_msleep(50);
 	else if (panel->panel_id == PANEL_LIBERTY_EID_24pin)
 		hr_msleep(40);
 	else
 		hr_msleep(100);
 
-	if (panel->panel_id != PANEL_ESPRESSO_TPO)
+	if (panel->panel_id != PANEL_ESPRESSO_TPO || panel->panel_id != PANEL_ID_ICN_TPO)
 	        eid_cmd(client_data, DCON, prm, 4, 0x07, 0x00, 0x00, 0x00);
         else {
                 eid_cmd(client_data, SLPOUT, prm, 4, 0x00, 0x00, 0x00, 0x00);
@@ -572,7 +623,9 @@ eid_client_uninit(struct msm_mddi_bridge_platform_data *bridge,
 
 	B(KERN_DEBUG "%s: enter.\n", __func__);
 	client_data->auto_hibernate(client_data, 0);
-	if (bridge->panel_type == PANEL_ESPRESSO_SHARP)
+	if ((bridge->panel_type == PANEL_ESPRESSO_SHARP) ||
+		(bridge->panel_type == PANEL_ID_ICN_SHARP) ||
+		(bridge->panel_type == PANEL_ICON_G_SHARP))
 	{
 		eid_cmd(client_data, 0x28, prm, 4, 0x07, 0x00, 0x00, 0x00);
 		eid_cmd(client_data, 0x10, prm, 4, 0x07, 0x00, 0x00, 0x00);
@@ -589,7 +642,7 @@ eid_client_uninit(struct msm_mddi_bridge_platform_data *bridge,
 	else
 		eid_cmd(client_data, DCON, prm, 4, 0x00, 0x00, 0x00, 0x00);
 	hr_msleep(30);
-	if (panel->panel_id == PANEL_ESPRESSO_TPO)
+	if (panel->panel_id == PANEL_ESPRESSO_TPO || panel->panel_id == PANEL_ID_ICN_TPO)
 		eid_cmd(client_data, 0xf3, prm, 12, 0x00, 0x00, 0x2a, 0x00,
 		0x00, 0x33, 0x75, 0x75, 0x00, 0x00, 0x00, 0x00);
 	else
@@ -597,7 +650,8 @@ eid_client_uninit(struct msm_mddi_bridge_platform_data *bridge,
 	eid_cmd(client_data, SLPIN, prm, 4, 0x00, 0x00, 0x00, 0x00);
 	if ((panel->panel_id == PANEL_EID_24pin) ||
 	   (panel->panel_id == PANEL_ESPRESSO_TPO) ||
-	   (panel->panel_id == PANEL_LIBERTY_EID_24pin))
+	   (panel->panel_id == PANEL_LIBERTY_EID_24pin) ||
+	   (panel->panel_id == PANEL_ID_ICN_TPO))
 		eid_cmd(client_data, MDDICTL, prm, 4, 0x02, 0x00, 0x00, 0x00);
 	if (panel->panel_id != PANEL_LIBERTY_TPO)
 		hr_msleep(210);
@@ -713,6 +767,102 @@ eid2_client_uninit(struct msm_mddi_bridge_platform_data *bridge,
 	return 0;
 }
 
+static const struct mddi_cmd renesas_init_cmd_table[] = {
+	LCM_CMD(0xb0, 0, 0x04, 0x00, 0x00, 0x00),
+	LCM_CMD(0x36, 0, 0x08, 0x00, 0x00, 0x00),
+	LCM_CMD(0x3a, 0, 0x05, 0x00, 0x00, 0x00),
+	LCM_CMD(0x35, 0, 0x00, 0x00, 0x00, 0x00),
+	LCM_CMD(0xb8, 0, 0x01, 0x00, 0x00, 0x00, 0x1a, 0x00, 0x00, 0x00,
+		0x18, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x40, 0x00,
+		0x00, 0x00, 0x18, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x18, 0x00, 0x00, 0x00, 0x18, 0x00, 0x00, 0x00, 0x85, 0x00,
+		0x00, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00,
+		0x04, 0x00, 0x00, 0x00,	0x00, 0x00, 0x00, 0x00),
+	LCM_CMD(0xb9, 0, 0x01, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0xd9, 0x00, 0x00, 0x00),
+	LCM_CMD(0xc0, 0, 0x01, 0x00, 0x00, 0x00, 0xa1, 0x00, 0x00, 0x00,
+		0x40, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00),
+	LCM_CMD(0xc1, 0, 0x07, 0x00, 0x00, 0x00, 0x23, 0x00, 0x00, 0x00,
+		0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00),
+	LCM_CMD(0xc4, 0, 0x21, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x04, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00),
+	LCM_CMD(0xc8, 0, 0x04, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
+		0x0c, 0x00, 0x00, 0x00, 0x22, 0x00, 0x00, 0x00, 0x2f, 0x00,
+		0x00, 0x00, 0x43, 0x00,	0x00, 0x00, 0x4b, 0x00, 0x00, 0x00,
+		0x42, 0x00, 0x00, 0x00, 0x38, 0x00, 0x00, 0x00, 0x28, 0x00,
+		0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x1a, 0x00,	0x00, 0x00,
+		0x04, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x0c, 0x00,
+		0x00, 0x00, 0x22, 0x00, 0x00, 0x00, 0x2f, 0x00, 0x00, 0x00,
+		0x43, 0x00, 0x00, 0x00, 0x4b, 0x00, 0x00, 0x00, 0x42, 0x00,
+		0x00, 0x00, 0x38, 0x00,	0x00, 0x00, 0x28, 0x00, 0x00, 0x00,
+		0x20, 0x00, 0x00, 0x00, 0x1a, 0x00, 0x00, 0x00),
+	LCM_CMD(0xc9, 0, 0x04, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
+		0x0c, 0x00, 0x00, 0x00, 0x22, 0x00, 0x00, 0x00, 0x2f, 0x00,
+		0x00, 0x00, 0x43, 0x00,	0x00, 0x00, 0x4b, 0x00, 0x00, 0x00,
+		0x42, 0x00, 0x00, 0x00, 0x38, 0x00, 0x00, 0x00, 0x28, 0x00,
+		0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x1a, 0x00,	0x00, 0x00,
+		0x04, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x0c, 0x00,
+		0x00, 0x00, 0x22, 0x00, 0x00, 0x00, 0x2f, 0x00, 0x00, 0x00,
+		0x43, 0x00, 0x00, 0x00, 0x4b, 0x00, 0x00, 0x00, 0x42, 0x00,
+		0x00, 0x00, 0x38, 0x00,	0x00, 0x00, 0x28, 0x00, 0x00, 0x00,
+		0x20, 0x00, 0x00, 0x00, 0x1a, 0x00, 0x00, 0x00),
+	LCM_CMD(0xca, 0, 0x04, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
+		0x0c, 0x00, 0x00, 0x00, 0x22, 0x00, 0x00, 0x00, 0x2f, 0x00,
+		0x00, 0x00, 0x43, 0x00,	0x00, 0x00, 0x4b, 0x00, 0x00, 0x00,
+		0x42, 0x00, 0x00, 0x00, 0x38, 0x00, 0x00, 0x00, 0x28, 0x00,
+		0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x1a, 0x00,	0x00, 0x00,
+		0x04, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x0c, 0x00,
+		0x00, 0x00, 0x22, 0x00, 0x00, 0x00, 0x2f, 0x00, 0x00, 0x00,
+		0x43, 0x00, 0x00, 0x00, 0x4b, 0x00, 0x00, 0x00, 0x42, 0x00,
+		0x00, 0x00, 0x38, 0x00,	0x00, 0x00, 0x28, 0x00, 0x00, 0x00,
+		0x20, 0x00, 0x00, 0x00, 0x1a, 0x00, 0x00, 0x00),
+	LCM_CMD(0xd0, 0, 0xac, 0x00, 0x00, 0x00, 0x0e, 0x00, 0x00, 0x00,
+		0x88, 0x00, 0x00, 0x00, 0xa0, 0x00, 0x00, 0x00, 0x17, 0x00,
+		0x00, 0x00, 0x04, 0x00,	0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00,	0x00, 0x00,
+		0x01, 0x00, 0x00, 0x00,	0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x20, 0x00, 0x00, 0x00),
+	LCM_CMD(0xd1, 0, 0x02, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00,
+		0x08, 0x00, 0x00, 0x00, 0x4b, 0x00, 0x00, 0x00),
+	LCM_CMD(0xe1, 0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00,	0x00, 0x00),
+	LCM_CMD(0xe2, 0, 0x80, 0x00, 0x00, 0x00),
+	LCM_CMD(0xfd, 0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x70, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x72, 0x00,
+		0x00, 0x00, 0x31, 0x00,	0x00, 0x00, 0x37, 0x00, 0x00, 0x00,
+		0x76, 0x00, 0x00, 0x00, 0x32, 0x00, 0x00, 0x00, 0x31, 0x00,
+		0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x60, 0x00,	0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00),
+	LCM_CMD(0x2a, 0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x01, 0x00, 0x00, 0x00, 0xdf, 0x00, 0x00, 0x00),
+	LCM_CMD(0x2b, 0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x01, 0x00, 0x00, 0x00, 0x3f, 0x00, 0x00, 0x00),
+	LCM_CMD(0x11, 0, 0x00, 0x00, 0x00, 0x00),
+	LCM_CMD(0x29, 130, 0x00, 0x00, 0x00, 0x00),
+};
+
+static int
+renesas_client_init(struct msm_mddi_bridge_platform_data *bridge,
+		struct msm_mddi_client_data *client_data)
+{
+	int i = 0;
+	B(KERN_DEBUG "%s\n", __func__);
+
+	for (i = 0; i < ARRAY_SIZE(renesas_init_cmd_table); i++) {
+		client_data->remote_write_vals(client_data,
+				renesas_init_cmd_table[i].vals,
+				renesas_init_cmd_table[i].cmd,
+				renesas_init_cmd_table[i].len);
+		if (renesas_init_cmd_table[i].delay)
+			hr_msleep(renesas_init_cmd_table[i].delay);
+	}
+	return 0;
+}
+
 static int
 samsung_client_init(struct msm_mddi_bridge_platform_data *bridge,
 		    struct msm_mddi_client_data *client_data)
@@ -822,7 +972,7 @@ static int samsung_suspend(struct msm_panel_data *panel_data)
 	ret = bridge_data->uninit(bridge_data, client_data);
 	wake_unlock(&panel->idle_lock);
 	if (ret) {
-		printk(KERN_ERR "mddi samsung client: non zero return from "
+		PR_DISP_ERR("mddi samsung client: non zero return from "
 				"uninit\n");
 		return ret;
 	}
@@ -896,16 +1046,21 @@ static int samsung_shutdown(struct msm_panel_data *panel_data)
 static irqreturn_t eid_vsync_interrupt(int irq, void *data)
 {
 	struct panel_info *panel = data;
-
+#if !defined(CONFIG_ARCH_MSM7X30)
 #if DEBUG_VSYNC_INT
 	uint32_t val;
 	val = readl(VSYNC_STATUS);
 	if (!!(val & 0x04) == 0)
-		printk(KERN_ERR "BUG!! val: %x\n", val);
+		PR_DISP_ERR("BUG!! val: %x\n", val);
+#endif
 #endif
 	if (atomic_read(&panel->depth) > 0) {
 		atomic_dec(&panel->depth);
+#if defined(CONFIG_ARCH_MSM7X30)
+		disable_irq_nosync(gpio_to_irq(30));
+#else
 		disable_irq_nosync(gpio_to_irq(97));
+#endif
 	}
 
 	if (panel->fb_callback) {
@@ -921,7 +1076,11 @@ static irqreturn_t eid_vsync_interrupt(int irq, void *data)
 static int setup_vsync(struct panel_info *panel, int init)
 {
 	int ret;
+#if defined(CONFIG_ARCH_MSM7X30)
+	int gpio = 30;
+#else
 	int gpio = 97;
+#endif
 	unsigned int irq;
 
 	if (!init) {
@@ -932,15 +1091,16 @@ static int setup_vsync(struct panel_info *panel, int init)
 	ret = irq = gpio_to_irq(gpio);
 	if (ret < 0)
 		goto err_get_irq_num_failed;
-
+#if !defined(CONFIG_ARCH_MSM7X30)
 	samsung_clear_vsync();
+#endif
 	ret = request_irq(irq, eid_vsync_interrupt, IRQF_TRIGGER_HIGH,
 			"vsync", panel);
 	if (ret)
 		goto err_request_irq_failed;
 	disable_irq_nosync(irq);
 
-	printk(KERN_INFO "vsync on gpio %d now %d\n", gpio,
+	PR_DISP_INFO("vsync on gpio %d now %d\n", gpio,
 			gpio_get_value(gpio));
 	return 0;
 
@@ -948,7 +1108,7 @@ uninit:
 	free_irq(gpio_to_irq(gpio), panel->client_data);
 err_request_irq_failed:
 err_get_irq_num_failed:
-	printk(KERN_ERR "%s fail (%d)\n", __func__, ret);
+	PR_DISP_ERR("%s fail (%d)\n", __func__, ret);
 	return ret;
 }
 
@@ -974,7 +1134,6 @@ static int mddi_samsung_probe(struct platform_device *pdev)
 		goto err_out;
 	}
 	platform_set_drvdata(pdev, panel);
-
 	if ((panel_data->panel_id == PANEL_EID_40pin) ||
 	    (panel_data->panel_id == PANEL_EID_24pin) ||
 	    (panel_data->panel_id == PANEL_TPO) ||
@@ -983,7 +1142,10 @@ static int mddi_samsung_probe(struct platform_device *pdev)
 	    (panel_data->panel_id == PANEL_LIBERTY_TPO) ||
 	    (panel_data->panel_id == PANEL_LIBERTY_EID_24pin) ||
 	    (panel_data->panel_id == PANEL_ESPRESSO_SHARP) ||
-	    (panel_data->panel_id == PANEL_ESPRESSO_TPO)) {
+	    (panel_data->panel_id == PANEL_ESPRESSO_TPO) ||
+	    (panel_data->panel_id == PANEL_ID_ICN_SHARP) ||
+	    (panel_data->panel_id == PANEL_ID_ICN_TPO) ||
+	    (panel_data->panel_id == PANEL_ICON_G_SHARP)) {
 		bridge_data->init = eid_client_init;
 		bridge_data->uninit = eid_client_uninit;
 	} else if (panel_data->panel_id == PANEL_EIDII) {
@@ -992,19 +1154,21 @@ static int mddi_samsung_probe(struct platform_device *pdev)
 	} else if (panel_data->panel_id == PANEL_SAMSUNG) {
 		bridge_data->init = samsung_client_init;
 		bridge_data->uninit = samsung_client_uninit;
+	} else if (panel_data->panel_id == PANEL_CHACHA_AUO) {
+		bridge_data->init = renesas_client_init;
+		bridge_data->uninit = eid_client_uninit;
 	} else {
-		printk(KERN_ERR "%s: unknown panel type %d\n",
+		PR_DISP_ERR("%s: unknown panel type %d\n",
 			__func__, panel_data->panel_id);
 		err = -ENXIO;
 		goto err_panel;
 	}
 
 	if (panel_data->caps & MSMFB_CAP_CABC) {
-		printk(KERN_INFO "CABC enabled\n");
+		PR_DISP_INFO("CABC enabled\n");
 		cabc_config.client = client_data;
 		platform_device_register(&mddi_samsung_cabc);
 	}
-
 	ret = setup_vsync(panel, 1);
 	if (ret) {
 		dev_err(&pdev->dev, "mddi_samsung_setup_vsync failed\n");
@@ -1020,7 +1184,9 @@ static int mddi_samsung_probe(struct platform_device *pdev)
 	panel->panel_data.blank = samsung_blank;
 	panel->panel_data.unblank = samsung_unblank;
 	/* panel->panel_data.clear_vsync = samsung_clear_vsync; */
+#if !defined(CONFIG_ARCH_MSM7X30)
 	panel->panel_data.dump_vsync = samsung_dump_vsync;
+#endif
 	panel->panel_data.shutdown = samsung_shutdown;
 	panel->panel_data.fb_data = &bridge_data->fb_data;
 	panel->panel_data.caps = ~MSMFB_CAP_PARTIAL_UPDATES;

@@ -20,6 +20,7 @@
 #include <linux/module.h>
 #include <linux/completion.h>
 #include <linux/err.h>
+#include <linux/slab.h>
 #include <mach/msm_reqs.h>
 #include "npa_remote.h"
 

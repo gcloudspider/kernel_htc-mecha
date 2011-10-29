@@ -21,6 +21,8 @@
 #include <linux/mm.h>
 #include <linux/gfp.h>
 #include <linux/uaccess.h>
+#include <linux/slab.h>
+#include <linux/mfd/msm-adie-codec.h>
 #include <mach/qdsp5v2/snddev_icodec.h>
 #include <mach/qdsp5v2/audio_dev_ctl.h>
 #include <mach/qdsp5v2/audio_acdb.h>
@@ -33,7 +35,6 @@
 #include <mach/htc_acdb.h>
 #include <mach/htc_acoustic_7x30.h>
 #include "board-vision.h"
-
 
 #define ACOUSTIC_IOCTL_MAGIC 'p'
 #define ACOUSTIC_ADIE_SIZE	_IOW(ACOUSTIC_IOCTL_MAGIC, 15, size_t)
@@ -48,12 +49,15 @@
 #define ACOUSTIC_MIC_DISABLE	_IOW(ACOUSTIC_IOCTL_MAGIC, 29, int)
 #define ACOUSTIC_REINIT_ACDB    _IOW(ACOUSTIC_IOCTL_MAGIC, 30, unsigned)
 #define ACOUSTIC_GET_BACK_MIC_STATE	_IOW(ACOUSTIC_IOCTL_MAGIC, 31, int)
-#define ACOUSTIC_MUTE_HEADSET 	_IOW(ACOUSTIC_IOCTL_MAGIC, 32, int)
+#define ACOUSTIC_MUTE_HEADSET 			_IOW(ACOUSTIC_IOCTL_MAGIC, 32, int)
 #define ACOUSTIC_GET_TABLES 	_IOW(ACOUSTIC_IOCTL_MAGIC, 33, unsigned)
 #define ACOUSTIC_ENABLE_BACK_MIC	_IOW(ACOUSTIC_IOCTL_MAGIC, 34, unsigned)
+#define ACOUSTIC_UPDATE_AIC3254_INFO	_IOW(ACOUSTIC_IOCTL_MAGIC, 36, unsigned)
+#define ACOUSTIC_GET_RECEIVER_STATE		_IOW(ACOUSTIC_IOCTL_MAGIC, 37, int)
 
-#define D(fmt, args...) printk(KERN_INFO "htc-acoustic: "fmt, ##args)
-#define E(fmt, args...) printk(KERN_ERR "htc-acoustic: "fmt, ##args)
+
+#define D(fmt, args...) printk(KERN_INFO "[AUD] htc-acoustic: "fmt, ##args)
+#define E(fmt, args...) printk(KERN_ERR "[AUD] htc-acoustic: "fmt, ##args)
 
 #define SHARE_PAGES 4
 
@@ -118,7 +122,7 @@ static int is_rpc_connect(void)
 		endpoint = msm_rpc_connect(HTCPROG,
 				HTCVERS, 0);
 		if (IS_ERR(endpoint)) {
-			pr_err("%s: init rpc failed! rc = %ld\n",
+			pr_aud_err("%s: init rpc failed! rc = %ld\n",
 				__func__, PTR_ERR(endpoint));
 			mutex_unlock(&rpc_connect_lock);
 			return -1;
@@ -153,6 +157,7 @@ acoustic_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	struct adie_codec_action_unit *htc_adie_ptr;
 	struct acdb_id cur_acdb_id;
 	char filename[64];
+	struct aic3254_info cur_aic3254_info;
 
 	mutex_lock(&api_lock);
 	switch (cmd) {
@@ -243,7 +248,7 @@ acoustic_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 				rc = -EFAULT;
 			}
 		} else {
-			E("can't find registry device with name %s\n", act_info.name);
+			D("can't find registry device with name %s\n", act_info.name);
 			rc = -EFAULT;
 		}
 
@@ -258,7 +263,8 @@ acoustic_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			rc = -EFAULT;
 			break;
 		}
-		E("update ACDB ID : (%d, %d, %d, %d)\n", 
+		pr_aud_info("%s update ACDB ID : (%d, %d, %d, %d)\n",
+			__func__,
 			cur_acdb_id.tx_dev_id,
 			cur_acdb_id.rx_dev_id,
 			cur_acdb_id.tx_acdb_id,
@@ -398,6 +404,31 @@ acoustic_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			the_ops->enable_back_mic(en);
 		break;
 	}
+	case ACOUSTIC_UPDATE_AIC3254_INFO:
+		if (copy_from_user(&cur_aic3254_info, (void *)arg,
+			sizeof(struct aic3254_info))) {
+			rc = -EFAULT;
+			break;
+		}
+		E("update AIC3254 ID : (%d, %d)\n",
+			cur_aic3254_info.dev_id,
+			cur_aic3254_info.path_id);
+
+		rc = update_aic3254_info(&cur_aic3254_info);
+		break;
+	case ACOUSTIC_GET_RECEIVER_STATE: {
+		int support_receiver = 1;
+		if (the_ops->support_receiver)
+			support_receiver= the_ops->support_receiver();
+		D("support_receiver: %d\n", support_receiver);
+		if (copy_to_user((void *) arg,
+			&support_receiver, sizeof(int))) {
+			E("acoustic_ioctl: ACOUSTIC_GET_RECEIVER failed\n");
+			rc = -EFAULT;
+		}
+		break;
+	}
+
 	default:
 		rc = -EINVAL;
 	}
@@ -476,11 +507,11 @@ static ssize_t attr_store(struct device *dev, struct device_attribute *attr,
 	return 0;
 }
 
-static DEVICE_ATTR(sysattr, 0666, attr_show, attr_store);
+static DEVICE_ATTR(sysattr, 0644, attr_show, attr_store);
 
 int enable_mic_bias(int on)
 {
-	pr_info("%s called %d\n", __func__, on);
+	pr_aud_info("%s called %d\n", __func__, on);
 	if (the_ops->enable_mic_bias)
 		the_ops->enable_mic_bias(on, 1);
 
@@ -495,7 +526,7 @@ static int __init acoustic_init(void)
 	mutex_init(&rpc_connect_lock);
 	ret = misc_register(&acoustic_misc);
 	if (ret < 0) {
-		pr_err("failed to register misc device!\n");
+		pr_aud_err("failed to register misc device!\n");
 		return ret;
 	}
 

@@ -22,12 +22,12 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA.
  */
-
 #include <linux/delay.h>
 #include <linux/err.h>
 #include <linux/io.h>
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
+#include <linux/slab.h>
 
 #include <mach/msm_ssbi.h>
 /*#include <mach/remote_spinlock.h>*/
@@ -229,7 +229,7 @@ err:
 	return ret;
 }
 
-static int __init msm_ssbi_probe(struct platform_device *pdev)
+static int msm_ssbi_probe(struct platform_device *pdev)
 {
 	struct msm_ssbi_platform_data *pdata = pdev->dev.platform_data;
 	struct resource *mem_res;
@@ -265,7 +265,7 @@ static int __init msm_ssbi_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, ssbi);
 
 	/*ret = remote_spin_lock_init(&ssbi->rspin_lock, pdata->rspinlock_name);*/
-	remote_spin_lock_init(&ssbi->rspin_lock, pdata->rspinlock_name);
+	ret = remote_spin_lock_init(&ssbi->rspin_lock, pdata->rspinlock_name);
 	if (ret) {
 		pr_err("%s: cannot init remote spinlock '%s'\n", __func__,
 		       pdata->rspinlock_name);

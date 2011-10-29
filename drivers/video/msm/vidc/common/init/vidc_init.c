@@ -41,14 +41,14 @@
 #include "vcd_res_tracker_api.h"
 
 #if DEBUG
-#define DBG(x...) printk(KERN_DEBUG x)
+#define DBG(x...) printk(KERN_DEBUG "[VID] " x)
 #else
 #define DBG(x...)
 #endif
 
 #define VIDC_NAME "msm_vidc_reg"
 
-#define ERR(x...) printk(KERN_ERR x)
+#define ERR(x...) printk(KERN_ERR "[VID] " x)
 #define HW_TIME_OUT 10
 static struct vidc_dev *vidc_device_p;
 static dev_t vidc_dev_num;
@@ -112,7 +112,7 @@ static void vidc_work_handler(struct work_struct *work)
 
 static DECLARE_WORK(vidc_work, vidc_work_handler);
 
-static int __init vidc_720p_probe(struct platform_device *pdev)
+static int vidc_720p_probe(struct platform_device *pdev)
 {
 	struct resource *resource;
 	DBG("Enter %s()\n", __func__);

@@ -26,10 +26,7 @@
 #include <linux/platform_device.h>
 #include <mach/msm_fb.h>
 #include <linux/input.h>
-#ifdef CONFIG_FB_MSM_WRITE_BACK
-#include <linux/io.h>
-#include <linux/android_pmem.h>
-#endif
+
 #include <linux/usb/android_composite.h>
 #include <linux/wakelock.h>
 #ifdef DBG
@@ -48,7 +45,11 @@
 
 /* number of rx and tx requests to allocate */
 #define RX_REQ_MAX 4
+#if defined(CONFIG_MACH_FLYER) || defined(CONFIG_MACH_EXPRESS)
+#define TX_REQ_MAX 75 /*for resolution 1024*600*2 / 16k */
+#else
 #define TX_REQ_MAX 56 /*for 8k resolution 480*800*2 / 16k */
+#endif
 
 #define BITSPIXEL 16
 #define PROJECTOR_FUNCTION_NAME "projector"
@@ -56,9 +57,7 @@
 static struct wake_lock prj_idle_wake_lock;
 static int keypad_code[] = {KEY_WAKEUP, 0, 0, 0, KEY_HOME, KEY_MENU, KEY_BACK};
 static const char shortname[] = "android_projector";
-#ifdef CONFIG_FB_MSM_WRITE_BACK
-unsigned char *fbram;
-#endif
+
 struct projector_dev {
 	struct usb_function function;
 	struct usb_composite_dev *cdev;
@@ -348,7 +347,7 @@ static void send_fb(struct projector_dev *ctxt)
 			count -= xfer;
 			frame += xfer;
 		} else {
-			DBG("send_fb: no req to send\n");
+			printk(KERN_ERR "send_fb: no req to send\n");
 			break;
 		}
 	}
@@ -383,19 +382,20 @@ static void send_info(struct projector_dev *ctxt)
 
 static void projector_get_msmfb(struct projector_dev *ctxt)
 {
-        struct msm_fb_info fb_info;
+    struct msm_fb_info fb_info;
+
 	msmfb_get_var(&fb_info);
 
 	ctxt->bitsPixel = BITSPIXEL;
 	ctxt->width = fb_info.xres;
 	ctxt->height = fb_info.yres;
-	printk(KERN_INFO "projector: width %d, height %d\n",fb_info.xres, fb_info.yres);
-	ctxt->framesize = (ctxt->width)*(ctxt->height)*2;
-#ifdef CONFIG_FB_MSM_WRITE_BACK
-	ctxt->fbaddr =  fbram;
-#else
 	ctxt->fbaddr = fb_info.fb_addr;
-#endif
+	printk(KERN_INFO "projector: width %d, height %d\n",
+		   fb_info.xres, fb_info.yres);
+
+	ctxt->framesize = (ctxt->width)*(ctxt->height)*2;
+	printk(KERN_INFO "projector: width %d, height %d %d\n",
+		   fb_info.xres, fb_info.yres, ctxt->framesize);
 }
 
 static void projector_complete_in(struct usb_ep *ep, struct usb_request *req)
@@ -569,6 +569,24 @@ projector_function_unbind(struct usb_configuration *c, struct usb_function *f)
 	spin_unlock_irq(&dev->lock);
 }
 
+static void
+projector_function_release(struct usb_configuration *c, struct usb_function *f)
+{
+	struct projector_dev	*dev = func_to_dev(f);
+	struct usb_request *req;
+
+	spin_lock_irq(&dev->lock);
+
+	while ((req = req_get(dev, &dev->tx_idle)))
+		projector_request_free(req, dev->ep_in);
+	while ((req = req_get(dev, &dev->rx_idle)))
+		projector_request_free(req, dev->ep_out);
+
+	dev->online = 0;
+	dev->error = 1;
+	spin_unlock_irq(&dev->lock);
+}
+
 static int projector_function_set_alt(struct usb_function *f,
 		unsigned intf, unsigned alt)
 {
@@ -618,6 +636,7 @@ static int projector_touch_init(struct projector_dev *dev)
 	int ret = 0;
 	struct input_dev *tdev = dev->touch_input;
 
+	printk(KERN_INFO "%s: x=%d y=%d\n", __func__, x, y);
 	dev->touch_input  = input_allocate_device();
 	if (dev->touch_input == NULL) {
 		printk(KERN_ERR "%s: Failed to allocate input device\n",
@@ -731,7 +750,7 @@ static ssize_t show_enable(struct device *dev, struct device_attribute *attr,
 	return 2;
 
 }
-static DEVICE_ATTR(enable, 0666, show_enable, store_enable);
+static DEVICE_ATTR(enable, 0664, show_enable, store_enable);
 
 static void prj_dev_release(struct device *dev) {}
 
@@ -760,6 +779,7 @@ static int projector_bind_config(struct usb_configuration *c)
 	dev->function.hs_descriptors = hs_projector_descs;
 	dev->function.bind = projector_function_bind;
 	dev->function.unbind = projector_function_unbind;
+	dev->function.release = projector_function_release;
 	dev->function.set_alt = projector_function_set_alt;
 	dev->function.disable = projector_function_disable;
 
@@ -770,11 +790,7 @@ static int projector_bind_config(struct usb_configuration *c)
 	dev->bitsPixel = BITSPIXEL;
 	dev->width = fb_info.xres;
 	dev->height = fb_info.yres;
-#ifdef CONFIG_FB_MSM_WRITE_BACK
-	dev->fbaddr = fbram;
-#else
 	dev->fbaddr = fb_info.fb_addr;
-#endif
 	if (projector_touch_init(dev) < 0)
 		goto err;
 	if (projector_keypad_init(dev) < 0)
@@ -820,13 +836,6 @@ static struct android_usb_function projector_function = {
 static int pjr_probe(struct platform_device *pdev)
 {
 	struct projector_dev *dev = &_projector_dev;
-#ifdef CONFIG_FB_MSM_WRITE_BACK
-	ulong wb_addr ;
-	struct msm_fb_info fb_info;
-        msmfb_get_var(&fb_info);
-	wb_addr = get_pmem_id_addr(0);
-	fbram = ioremap(wb_addr,4*fb_info.xres*fb_info.yres);
-#endif
 	dev->pdev = pdev;
 	dev->init_done = 0;
 	dev->frame_count = 0;

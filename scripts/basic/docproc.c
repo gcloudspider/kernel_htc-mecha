@@ -133,12 +133,7 @@ static void add_new_symbol(struct symfile *sym, char * symname)
 {
 	sym->symbollist =
           realloc(sym->symbollist, (sym->symbolcnt + 1) * sizeof(char *));
-	if (sym->symbollist)
-		sym->symbollist[sym->symbolcnt++].name = strdup(symname);
-	else {
-		printf("(%s) realloc failed\n", __func__);
-		exit(1);
-	}
+	sym->symbollist[sym->symbolcnt++].name = strdup(symname);
 }
 
 /* Add a filename to the list */

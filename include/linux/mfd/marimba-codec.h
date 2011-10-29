@@ -64,4 +64,5 @@ int adie_codec_set_device_digital_volume(struct adie_codec_path *path_ptr,
 
 int adie_codec_set_device_analog_volume(struct adie_codec_path *path_ptr,
 		u32 num_channels, u32 volume /* in percentage */);
+int usb_headset_adie_enable(int enable);
 #endif

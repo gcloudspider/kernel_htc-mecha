@@ -423,7 +423,7 @@ static int __init amoled_init_panel(void)
 	return 0;
 }
 
-static int __init amoled_probe(struct platform_device *pdev)
+static int amoled_probe(struct platform_device *pdev)
 {
 	int rc = -EIO;
 	struct panel_platform_data *pdata;

@@ -1,62 +1,23 @@
 /* Copyright (c) 2009-2010, Code Aurora Forum. All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in the
- *       documentation and/or other materials provided with the distribution.
- *     * Neither the name of Code Aurora Forum nor
- *       the names of its contributors may be used to endorse or promote
- *       products derived from this software without specific prior written
- *       permission.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
  *
- * Alternatively, provided that this notice is retained in full, this software
- * may be relicensed by the recipient under the terms of the GNU General Public
- * License version 2 ("GPL") and only version 2, in which case the provisions of
- * the GPL apply INSTEAD OF those given above.  If the recipient relicenses the
- * software under the GPL, then the identification text in the MODULE_LICENSE
- * macro must be changed to reflect "GPLv2" instead of "Dual BSD/GPL".  Once a
- * recipient changes the license terms to the GPL, subsequent recipients shall
- * not relicense under alternate licensing terms, including the BSD or dual
- * BSD/GPL terms.  In addition, the following license statement immediately
- * below and between the words START and END shall also then apply when this
- * software is relicensed under the GPL:
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  *
- * START
- *
- * This program is free software; you can redistribute it and/or modify it under
- * the terms of the GNU General Public License version 2 and only version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- * FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
- * details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * END
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  *
  */
 #include <linux/module.h>
 #include <linux/platform_device.h>
-#include <linux/mfd/marimba-codec.h>
+#include <linux/mfd/msm-adie-codec.h>
 #include <linux/clk.h>
 #include <linux/err.h>
 #include <linux/debugfs.h>
@@ -68,12 +29,14 @@
 #include <mach/qdsp5v2/afe.h>
 #include <mach/qdsp5v2/lpa.h>
 #include <mach/vreg.h>
-#include <mach/debug_audio_mm.h>
 #include <linux/wakelock.h>
+#include <linux/slab.h>
 #include <mach/qdsp5v2/audio_acdb_def.h>
+#include <linux/spi/spi_aic3254.h>
 
 #include <mach/qdsp5v2/marimba_profile.h>
 #include <asm/mach-types.h>
+#include <mach/debug_mm.h>
 
 #define SNDDEV_ICODEC_PCM_SZ 32 /* 16 bit / sample stereo mode */
 #define SNDDEV_ICODEC_MUL_FACTOR 3 /* Multi by 8 Shift by 3  */
@@ -82,6 +45,8 @@
 
 static struct q5v2audio_icodec_ops default_audio_ops;
 static struct q5v2audio_icodec_ops * audio_ops = &default_audio_ops;
+static struct q5v2audio_aic3254_ops default_aic3254_ops;
+static struct q5v2audio_aic3254_ops *aic3254_ops = &default_aic3254_ops;
 static int support_aic3254 = 0;
 
 #ifdef CONFIG_DEBUG_FS
@@ -322,8 +287,7 @@ static int snddev_icodec_open_rx(struct snddev_icodec_state *icodec)
 	mi2s_set_codec_output_path((icodec->data->channel_mode == 2 ?
 	MI2S_CHAN_STEREO : MI2S_CHAN_MONO_PACKED), WT_16_BIT);
 
-	if (!support_aic3254 ||
-		 !strcmp(icodec->data->name, "usb_headset_stereo_rx")) {
+	if (!support_aic3254) {
 		/* Configure ADIE */
 		trc = adie_codec_open(icodec->data->profile, &icodec->adie_path);
 		if (IS_ERR_VALUE(trc))
@@ -332,6 +296,15 @@ static int snddev_icodec_open_rx(struct snddev_icodec_state *icodec)
 		 * If OSR is to be changed, need clock API for setting the divider
 		 */
 		adie_codec_setpath(icodec->adie_path, icodec->sample_rate, 256);
+	} else {
+		if (aic3254_ops->aic3254_set_mode) {
+			if (msm_get_call_state() == 1)
+				aic3254_ops->aic3254_set_mode(AIC3254_CONFIG_RX,
+					icodec->data->aic3254_voc_id);
+			else
+				aic3254_ops->aic3254_set_mode(AIC3254_CONFIG_RX,
+					icodec->data->aic3254_id);
+		}
 	}
 
 	/* Start AFE */
@@ -342,8 +315,7 @@ static int snddev_icodec_open_rx(struct snddev_icodec_state *icodec)
 	if (IS_ERR_VALUE(trc))
 		goto error_afe;
 	lpa_cmd_enable_codec(drv->lpa, 1);
-	if (!support_aic3254 ||
-		 !strcmp(icodec->data->name, "usb_headset_stereo_rx")) {
+	if (!support_aic3254) {
 		/* Enable ADIE */
 		if (adie_codec_proceed_stage(icodec->adie_path,
 					ADIE_CODEC_DIGITAL_READY) ) {
@@ -368,8 +340,7 @@ static int snddev_icodec_open_rx(struct snddev_icodec_state *icodec)
 	return 0;
 
 error_afe:
-	if (!support_aic3254 ||
-		 !strcmp(icodec->data->name, "usb_headset_stereo_rx")) {
+	if (!support_aic3254) {
 		adie_codec_close(icodec->adie_path);
 		icodec->adie_path = NULL;
 	}
@@ -380,10 +351,11 @@ error_lpa:
 	clk_disable(drv->lpa_codec_clk);
 	clk_disable(drv->lpa_core_clk);
 	clk_disable(drv->rx_sclk);
-	clk_disable(drv->rx_mclk);
+	if (!support_aic3254)
+		clk_disable(drv->rx_mclk);
 error_invalid_freq:
 
-	pr_err("%s: encounter error\n", __func__);
+	pr_aud_err("%s: encounter error\n", __func__);
 
 	wake_unlock(&drv->rx_idlelock);
 	return -ENODEV;
@@ -411,8 +383,24 @@ static int snddev_icodec_open_tx(struct snddev_icodec_state *icodec)
 	clk_enable(drv->tx_sclk);
 
 	/* Set MI2S */
-	mi2s_set_codec_input_path((icodec->data->channel_mode == 2 ?
-	MI2S_CHAN_STEREO : MI2S_CHAN_MONO_RAW), WT_16_BIT);
+	mi2s_set_codec_input_path((icodec->data->channel_mode ==
+				REAL_STEREO_CHANNEL_MODE ? MI2S_CHAN_STEREO :
+				(icodec->data->channel_mode == 2 ?
+				 MI2S_CHAN_STEREO : MI2S_CHAN_MONO_RAW)),
+				WT_16_BIT);
+
+	/* Enable External Codec A3254 */
+	if (support_aic3254) {
+		if (aic3254_ops->aic3254_set_mode) {
+			if (msm_get_call_state() == 1)
+				aic3254_ops->aic3254_set_mode(AIC3254_CONFIG_TX,
+					icodec->data->aic3254_voc_id);
+			else
+				aic3254_ops->aic3254_set_mode(AIC3254_CONFIG_TX,
+					icodec->data->aic3254_id);
+		}
+	}
+
 	/* Configure ADIE */
 	trc = adie_codec_open(icodec->data->profile, &icodec->adie_path);
 	if (IS_ERR_VALUE(trc))
@@ -455,7 +443,7 @@ error_invalid_freq:
 	if (icodec->data->pamp_on)
 		icodec->data->pamp_on(0);
 
-	pr_err("%s: encounter error\n", __func__);
+	pr_aud_err("%s: encounter error\n", __func__);
 
 	wake_unlock(&drv->tx_idlelock);
 	return -ENODEV;
@@ -464,6 +452,7 @@ error_invalid_freq:
 static int snddev_icodec_close_rx(struct snddev_icodec_state *icodec)
 {
 	struct snddev_icodec_drv_state *drv = &snddev_icodec_drv;
+	struct snddev_icodec_data *data = icodec->data;
 
 	wake_lock(&drv->rx_idlelock);
 
@@ -471,13 +460,20 @@ static int snddev_icodec_close_rx(struct snddev_icodec_state *icodec)
 	if (icodec->data->pamp_on)
 		icodec->data->pamp_on(0);
 
-	if (!support_aic3254 ||
-		 !strcmp(icodec->data->name, "usb_headset_stereo_rx")) {
+	if (!support_aic3254) {
 		/* Disable ADIE */
 		adie_codec_proceed_stage(icodec->adie_path,
 						ADIE_CODEC_DIGITAL_OFF);
 		adie_codec_close(icodec->adie_path);
 		icodec->adie_path = NULL;
+	} else {
+		/* Restore default id for A3254 */
+		if (data->aic3254_id != data->default_aic3254_id)
+			data->aic3254_id = data->default_aic3254_id;
+		/* Disable External Codec A3254 */
+		if (aic3254_ops->aic3254_set_mode)
+			aic3254_ops->aic3254_set_mode(AIC3254_CONFIG_RX,
+							DOWNLINK_OFF);
 	}
 
 	afe_disable(AFE_HW_PATH_CODEC_RX);
@@ -504,6 +500,7 @@ static int snddev_icodec_close_rx(struct snddev_icodec_state *icodec)
 static int snddev_icodec_close_tx(struct snddev_icodec_state *icodec)
 {
 	struct snddev_icodec_drv_state *drv = &snddev_icodec_drv;
+	struct snddev_icodec_data *data = icodec->data;
 
 	wake_lock(&drv->tx_idlelock);
 
@@ -513,6 +510,16 @@ static int snddev_icodec_close_tx(struct snddev_icodec_state *icodec)
 	adie_codec_proceed_stage(icodec->adie_path, ADIE_CODEC_DIGITAL_OFF);
 	adie_codec_close(icodec->adie_path);
 	icodec->adie_path = NULL;
+
+	if (support_aic3254) {
+		/* Restore default id for A3254 */
+		if (data->aic3254_id != data->default_aic3254_id)
+			data->aic3254_id = data->default_aic3254_id;
+		/* Disable External Codec A3254 */
+		if (aic3254_ops->aic3254_set_mode)
+			aic3254_ops->aic3254_set_mode(AIC3254_CONFIG_TX,
+							UPLINK_OFF);
+	}
 
 	/* Disable MI2S TX master block */
 	/* Disable MI2S TX bit clock */
@@ -549,9 +556,11 @@ static int snddev_icodec_set_device_volume_impl(
 	if (icodec->data->dev_vol_type & SNDDEV_DEV_VOL_DIGITAL) {
 
 		rc = adie_codec_set_device_digital_volume(icodec->adie_path,
-				icodec->data->channel_mode, volume);
+				icodec->data->channel_mode ==
+						REAL_STEREO_CHANNEL_MODE ?
+					2 : icodec->data->channel_mode, volume);
 		if (rc < 0) {
-			pr_err("%s: unable to set_device_digital_volume for"
+			pr_aud_err("%s: unable to set_device_digital_volume for"
 				"%s volume in percentage = %u\n",
 				__func__, dev_info->name, volume);
 			return rc;
@@ -559,15 +568,17 @@ static int snddev_icodec_set_device_volume_impl(
 
 	} else if (icodec->data->dev_vol_type & SNDDEV_DEV_VOL_ANALOG) {
 		rc = adie_codec_set_device_analog_volume(icodec->adie_path,
-				icodec->data->channel_mode, volume);
+				icodec->data->channel_mode ==
+						REAL_STEREO_CHANNEL_MODE ?
+					2 : icodec->data->channel_mode, volume);
 		if (rc < 0) {
-			pr_err("%s: unable to set_device_analog_volume for"
+			pr_aud_err("%s: unable to set_device_analog_volume for"
 				"%s volume in percentage = %u\n",
 				__func__, dev_info->name, volume);
 			return rc;
 		}
 	} else {
-		pr_err("%s: Invalid device volume control\n", __func__);
+		pr_aud_err("%s: Invalid device volume control\n", __func__);
 		return -EPERM;
 	}
 	return rc;
@@ -585,7 +596,7 @@ static int snddev_icodec_open(struct msm_snddev_info *dev_info)
 	}
 
 	icodec = dev_info->private_data;
-	pr_info("snddev_icodec_open: device %s\n", dev_info->name);
+	pr_aud_info("snddev_icodec_open: device %s\n", dev_info->name);
 
 	if (icodec->data->capability & SNDDEV_CAP_RX) {
 		mutex_lock(&drv->rx_lock);
@@ -601,10 +612,10 @@ static int snddev_icodec_open(struct msm_snddev_info *dev_info)
 			if ((icodec->data->dev_vol_type & (
 				SNDDEV_DEV_VOL_DIGITAL |
 				SNDDEV_DEV_VOL_ANALOG)))
-				snddev_icodec_set_device_volume_impl(
+				rc = snddev_icodec_set_device_volume_impl(
 						dev_info, dev_info->dev_volume);
 		} else {
-			pr_info("snddev_icodec_open failed. %s\n", dev_info->name);
+			pr_aud_info("snddev_icodec_open failed. %s\n", dev_info->name);
 			mutex_unlock(&drv->rx_lock);
 			return rc;
 		}
@@ -623,10 +634,10 @@ static int snddev_icodec_open(struct msm_snddev_info *dev_info)
 			if ((icodec->data->dev_vol_type & (
 				SNDDEV_DEV_VOL_DIGITAL |
 				SNDDEV_DEV_VOL_ANALOG)))
-				snddev_icodec_set_device_volume_impl(
+				rc = snddev_icodec_set_device_volume_impl(
 						dev_info, dev_info->dev_volume);
 		} else {
-			pr_info("snddev_icodec_open failed. %s\n", dev_info->name);
+			pr_aud_info("snddev_icodec_open failed. %s\n", dev_info->name);
 			mutex_unlock(&drv->tx_lock);
 			return rc;
 		}
@@ -647,7 +658,7 @@ static int snddev_icodec_close(struct msm_snddev_info *dev_info)
 	}
 
 	icodec = dev_info->private_data;
-	pr_info("snddev_icodec_close: device %s\n", dev_info->name);
+	pr_aud_info("snddev_icodec_close: device %s\n", dev_info->name);
 
 	if (icodec->data->capability & SNDDEV_CAP_RX) {
 		mutex_lock(&drv->rx_lock);
@@ -689,7 +700,7 @@ static int snddev_icodec_check_freq(u32 req_freq)
 			(req_freq == 48000)) {
 				rc = 0;
 		} else
-			pr_info("%s: Unsupported Frequency:%d\n", __func__,
+			pr_aud_info("%s: Unsupported Frequency:%d\n", __func__,
 								req_freq);
 		}
 		return rc;
@@ -736,7 +747,7 @@ static int snddev_icodec_enable_sidetone(struct msm_snddev_info *dev_info,
 	struct snddev_icodec_drv_state *drv = &snddev_icodec_drv;
 
 	if (!dev_info) {
-		MM_ERR("invalid dev_info\n");
+		MM_AUD_ERR("invalid dev_info\n");
 		rc = -EINVAL;
 		goto error;
 	}
@@ -746,7 +757,7 @@ static int snddev_icodec_enable_sidetone(struct msm_snddev_info *dev_info,
 	if (icodec->data->capability & SNDDEV_CAP_RX) {
 		mutex_lock(&drv->rx_lock);
 		if (!drv->rx_active || !dev_info->opened) {
-			MM_ERR("dev not active\n");
+			MM_AUD_ERR("dev not active\n");
 			rc = -EPERM;
 			mutex_unlock(&drv->rx_lock);
 			goto error;
@@ -755,7 +766,7 @@ static int snddev_icodec_enable_sidetone(struct msm_snddev_info *dev_info,
 		mutex_unlock(&drv->rx_lock);
 	} else {
 		rc = -EINVAL;
-		MM_ERR("rx device only\n");
+		MM_AUD_ERR("rx device only\n");
 	}
 
 error:
@@ -772,7 +783,7 @@ int snddev_icodec_set_device_volume(struct msm_snddev_info *dev_info,
 	int rc = -EPERM;
 
 	if (!dev_info) {
-		pr_info("%s : device not intilized.\n", __func__);
+		pr_aud_info("%s : device not intilized.\n", __func__);
 		return  -EINVAL;
 	}
 
@@ -781,7 +792,7 @@ int snddev_icodec_set_device_volume(struct msm_snddev_info *dev_info,
 	if (!(icodec->data->dev_vol_type & (SNDDEV_DEV_VOL_DIGITAL
 				| SNDDEV_DEV_VOL_ANALOG))) {
 
-		pr_info("%s : device %s does not support device volume "
+		pr_aud_info("%s : device %s does not support device volume "
 				"control.", __func__, dev_info->name);
 		return -EPERM;
 	}
@@ -821,7 +832,7 @@ static int snddev_icodec_probe(struct platform_device *pdev)
 	pdata = pdev->dev.platform_data;
 	if ((pdata->capability & SNDDEV_CAP_RX) &&
 	   (pdata->capability & SNDDEV_CAP_TX)) {
-		pr_err("%s: invalid device data either RX or TX\n", __func__);
+		pr_aud_err("%s: invalid device data either RX or TX\n", __func__);
 		goto error;
 	}
 	icodec = kzalloc(sizeof(struct snddev_icodec_state), GFP_KERNEL);
@@ -854,7 +865,7 @@ static int snddev_icodec_probe(struct platform_device *pdev)
 	if (first_time) {
 		if (audio_ops->support_aic3254) {
 			support_aic3254 = audio_ops->support_aic3254();
-			pr_info("%s: support_aic3254 = %d\n",
+			pr_aud_info("%s: support_aic3254 = %d\n",
 				__func__, support_aic3254);
 		}
 		first_time = 0;
@@ -896,7 +907,7 @@ static struct adie_codec_path *debugfs_tx_adie;
 static int snddev_icodec_debug_open(struct inode *inode, struct file *file)
 {
 	file->private_data = inode->i_private;
-	pr_info("snddev_icodec: debug intf %s\n", (char *) file->private_data);
+	pr_aud_info("snddev_icodec: debug intf %s\n", (char *) file->private_data);
 	return 0;
 }
 
@@ -913,14 +924,14 @@ static void debugfs_adie_loopback(u32 loop)
 		clk_enable(drv->rx_mclk);
 		clk_enable(drv->rx_sclk);
 
-		pr_info("%s: configure ADIE RX path\n", __func__);
+		pr_aud_info("%s: configure ADIE RX path\n", __func__);
 		/* Configure ADIE */
 		adie_codec_open(&debug_rx_profile, &debugfs_rx_adie);
 		adie_codec_setpath(debugfs_rx_adie, 8000, 256);
 		adie_codec_proceed_stage(debugfs_rx_adie,
 		ADIE_CODEC_DIGITAL_ANALOG_READY);
 
-		pr_info("%s: Enable Handset Mic bias\n", __func__);
+		pr_aud_info("%s: Enable Handset Mic bias\n", __func__);
 		pmic_hsed_enable(PM_HSED_CONTROLLER_0, PM_HSED_ENABLE_PWM_TCXO);
 		/* enable MI2S TX master block */
 		/* enable MI2S TX bit clock */
@@ -929,7 +940,7 @@ static void debugfs_adie_loopback(u32 loop)
 		clk_enable(drv->tx_mclk);
 		clk_enable(drv->tx_sclk);
 
-		pr_info("%s: configure ADIE TX path\n", __func__);
+		pr_aud_info("%s: configure ADIE TX path\n", __func__);
 		/* Configure ADIE */
 		adie_codec_open(&debug_tx_lb_profile, &debugfs_tx_adie);
 		adie_codec_setpath(debugfs_tx_adie, 8000, 256);
@@ -971,7 +982,7 @@ static void debugfs_afe_loopback(u32 loop)
 		trc = clk_set_rate(drv->rx_mclk,
 		SNDDEV_ICODEC_CLK_RATE(8000));
 		if (IS_ERR_VALUE(trc))
-			pr_err("%s: failed to set clk rate\n", __func__);
+			pr_aud_err("%s: failed to set clk rate\n", __func__);
 		clk_enable(drv->rx_mclk);
 		clk_enable(drv->rx_sclk);
 		clk_enable(drv->lpa_codec_clk);
@@ -981,21 +992,21 @@ static void debugfs_afe_loopback(u32 loop)
 		audio_interct_codec(AUDIO_INTERCT_ADSP);
 		/* Set MI2S */
 		mi2s_set_codec_output_path(0, WT_16_BIT);
-		pr_info("%s: configure ADIE RX path\n", __func__);
+		pr_aud_info("%s: configure ADIE RX path\n", __func__);
 		/* Configure ADIE */
 		adie_codec_open(&debug_rx_profile, &debugfs_rx_adie);
 		adie_codec_setpath(debugfs_rx_adie, 8000, 256);
 		afe_config.sample_rate = 8;
 		afe_config.channel_mode = 1;
 		afe_config.volume = AFE_VOLUME_UNITY;
-		pr_info("%s: enable afe\n", __func__);
+		pr_aud_info("%s: enable afe\n", __func__);
 		trc = afe_enable(AFE_HW_PATH_CODEC_RX, &afe_config);
 		if (IS_ERR_VALUE(trc))
-			pr_err("%s: fail to enable afe rx\n", __func__);
+			pr_aud_err("%s: fail to enable afe rx\n", __func__);
 		adie_codec_proceed_stage(debugfs_rx_adie,
 		ADIE_CODEC_DIGITAL_ANALOG_READY);
 
-		pr_info("%s: Enable Handset Mic bias\n", __func__);
+		pr_aud_info("%s: Enable Handset Mic bias\n", __func__);
 		pmic_hsed_enable(PM_HSED_CONTROLLER_0, PM_HSED_ENABLE_PWM_TCXO);
 		/* enable MI2S TX master block */
 		/* enable MI2S TX bit clock */
@@ -1005,7 +1016,7 @@ static void debugfs_afe_loopback(u32 loop)
 		clk_enable(drv->tx_sclk);
 		/* Set MI2S */
 		mi2s_set_codec_input_path(0, WT_16_BIT);
-		pr_info("%s: configure ADIE TX path\n", __func__);
+		pr_aud_info("%s: configure ADIE TX path\n", __func__);
 		/* Configure ADIE */
 		adie_codec_open(&debug_tx_profile, &debugfs_tx_adie);
 		adie_codec_setpath(debugfs_tx_adie, 8000, 256);
@@ -1017,7 +1028,7 @@ static void debugfs_afe_loopback(u32 loop)
 		afe_config.volume = AFE_VOLUME_UNITY;
 		trc = afe_enable(AFE_HW_PATH_CODEC_TX, &afe_config);
 		if (IS_ERR_VALUE(trc))
-			pr_err("%s: failed to enable AFE TX\n", __func__);
+			pr_aud_err("%s: failed to enable AFE TX\n", __func__);
 	} else {
 		/* Disable ADIE */
 		adie_codec_proceed_stage(debugfs_rx_adie,
@@ -1050,7 +1061,7 @@ static ssize_t snddev_icodec_debug_write(struct file *filp,
 	if (get_user(cmd, ubuf))
 		return -EFAULT;
 
-	pr_info("%s: %s %c\n", __func__, lb_str, cmd);
+	pr_aud_info("%s: %s %c\n", __func__, lb_str, cmd);
 
 	if (!strcmp(lb_str, "adie_loopback")) {
 		switch (cmd) {
@@ -1080,6 +1091,30 @@ static const struct file_operations snddev_icodec_debug_fops = {
 	.write = snddev_icodec_debug_write
 };
 #endif
+
+void htc_7x30_register_aic3254_ops(struct q5v2audio_aic3254_ops *ops)
+{
+	aic3254_ops = ops;
+}
+
+int update_aic3254_info(struct aic3254_info *info)
+{
+	struct msm_snddev_info *dev_info;
+	int rc = 0;
+
+	dev_info = audio_dev_ctrl_find_dev(info->dev_id);
+	if (IS_ERR(dev_info))
+		rc = -ENODEV;
+	else {
+		struct snddev_icodec_state *icodec;
+		icodec = dev_info->private_data;
+		icodec->data->aic3254_id = info->path_id;
+		pr_info("%s: update aic3254 id of device %s as %d\n",
+			__func__, dev_info->name, icodec->data->aic3254_id);
+	}
+
+	return rc;
+}
 
 static int __init snddev_icodec_init(void)
 {
@@ -1149,7 +1184,7 @@ error_rx_mclk:
 	platform_driver_unregister(&snddev_icodec_driver);
 error_platform_driver:
 
-	pr_err("%s: encounter error\n", __func__);
+	pr_aud_err("%s: encounter error\n", __func__);
 	return -ENODEV;
 }
 

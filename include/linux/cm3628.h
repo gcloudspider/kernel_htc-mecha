@@ -52,11 +52,11 @@
 #define CM3628_ALS_IT_400ms 	(3 << 6)
 #define CM3628_ALS_PERS_1 		(0 << 4)
 #define CM3628_ALS_PERS_2 		(1 << 4)
-#define CM3628_ALS_PERS_4 		(2 << 4) /*ALS Persistence protect number setting*/
+#define CM3628_ALS_PERS_4 		(2 << 4)
 #define CM3628_ALS_PERS_8 		(3 << 4)
 #define CM3628_ALS_BIT2_Default_1	 	(1 << 2)
-#define CM3628_ALS_INT_EN	 	(1 << 1) /*enable/disable Interrupt, 1 = enable Interrupt*/
-#define CM3628_ALS_SD			(1 << 0)/*enable/disable ALS func, 1 = Disable ALS*/
+#define CM3628_ALS_INT_EN	 	(1 << 1) /*enable/disable Interrupt*/
+#define CM3628_ALS_SD			(1 << 0)/*enable/disable ALS func*/
 
 /*for ALS command 01h*/
 #define CM3628_ALS_RES			(1 << 6)
@@ -85,6 +85,7 @@
 /*for PS command 03h*/
 #define CM3628_PS_MS			(1 << 4)
 #define CM3628_PS_HYS			(1 << 0)
+#define CM3628_PS_SMART_PERS	(1 << 1)
 #define CM3628_IT_4X_ES			(1 << 6)/*for integration time*/
 #define CM3628_IT_4X_MP			(1 << 7)/*for integration time*/
 
@@ -112,9 +113,20 @@ struct cm3628_platform_data {
 	uint8_t inte_cancel_set;
 	/*command code 0x02, intelligent cancel level, for ps calibration*/
 	uint8_t ps_conf2_val; /* PS_CONF2 value */
+	uint8_t ps_calibration_rule;
+	uint8_t ps_conf1_val;
 	uint8_t *mapping_table;
 	uint8_t mapping_size;
 	uint8_t ps_base_index;
+	uint8_t enable_polling_ignore;
+	uint8_t ps_thd_no_cal;
+	uint8_t ps_thd_with_cal;
+	uint8_t is_cmd;
+	uint8_t ps_adc_offset;
+	uint8_t ps_adc_offset2;
+	uint8_t ps_debounce;
+	uint16_t ps_delay_time;
+	uint8_t ps_reset_thd;
 };
 
 #endif

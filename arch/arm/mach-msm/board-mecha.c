@@ -66,6 +66,7 @@
 #include <mach/vreg.h>
 #include <mach/atmega_microp.h>
 #include <mach/htc_battery.h>
+#include <linux/tps65200.h>
 #include <mach/tpa2051d3.h>
 #include <mach/rpc_pmapp.h>
 #include <mach/htc_headset_mgr.h>
@@ -89,7 +90,6 @@
 
 #define PMIC_GPIO_INT		27
 
-static unsigned kernel_flag;
 unsigned int engineerid;
 
 #ifdef CONFIG_MICROP_COMMON
@@ -241,7 +241,7 @@ static void config_mecha_usb_uart_gpios(int uart)
 		if (usb_test_mode)
 			gpio_set_value(MECHA_GPIO_USB_AUD_UART_SWITCH, 0);
 		else
-			gpio_set_value(MECHA_GPIO_USB_AUD_UART_SWITCH, 1);
+		gpio_set_value(MECHA_GPIO_USB_AUD_UART_SWITCH, 1);
 	} else {
 		/*USB*/
 		gpio_set_value(MECHA_GPIO_AUD_UART_SWITCH, 1);
@@ -447,7 +447,7 @@ static struct platform_device htc_headset_mgr = {
 
 static struct htc_battery_platform_data htc_battery_pdev_data = {
 	.guage_driver = GUAGE_MODEM,
-	.charger = SWITCH_CHARGER,
+	.charger = SWITCH_CHARGER_TPS65200,
 	.m2a_cable_detect = 1,
 	.int_data.chg_int = MSM_GPIO_TO_INT(PM8058_GPIO_PM_TO_SYS(MECHA_GPIO_CHG_INT)),
 };
@@ -561,9 +561,9 @@ static struct pm8058_led_platform_data pm8058_leds_data = {
 		   0, 0, 0, 0, 0, 0, 0, 0,
 		   0, 0, 0, 0, 0, 0, 0, 0,
 		   0, 0, 0, 0, 0, 0, 0, 0,
-		   0, 0, 0, 0, 0, 0, 0, 0,
-		   0, 0, 0, 0, 0, 0, 0, 0,
-		   0, 0, 0, 0, 0, 0, 0, 0},
+			0, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0},
 };
 
 static struct platform_device pm8058_leds = {
@@ -619,9 +619,9 @@ static struct pm8058_led_platform_data pm8058_leds_data_XC = {
 		   0, 0, 0, 0, 0, 0, 0, 0,
 		   0, 0, 0, 0, 0, 0, 0, 0,
 		   0, 0, 0, 0, 0, 0, 0, 0,
-		   0, 0, 0, 0, 0, 0, 0, 0,
-		   0, 0, 0, 0, 0, 0, 0, 0,
-		   0, 0, 0, 0, 0, 0, 0, 0},
+			0, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0,
+			0, 0, 0, 0, 0, 0, 0, 0},
 };
 
 static struct platform_device pm8058_leds_XC = {
@@ -859,19 +859,19 @@ struct atmel_i2c_platform_data mecha_ts_atmel_data[] = {
 		.config_T8 = {10, 0, 5, 2, 0, 0, 5, 25, 4, 170},
 		.config_T9 = {139, 0, 0, 19, 11, 0, 16, 30, 3, 1, 0, 5, 2, 0, 4, 20, 10, 10, 0, 0, 0, 0, 250, 3, 42, 50, 143, 50, 135, 65, 40, 10},
 		.config_T15 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-		.config_T19 = {3, 0, 0, 52, 0, 0, 0, 0, 0, 0, 0, 0},
+		.config_T18 = {0, 0},
+		.config_T19 = {3, 0, 0, 52, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		.config_T20 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		.config_T22 = {15, 0, 0, 0, 0, 0, 0, 0, 25, 0, 0, 0, 7, 18, 255, 255, 0},
-		.config_T23 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		.config_T23 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		.config_T24 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		.config_T25 = {3, 0, 40, 35, 136, 19, 0, 0, 0, 0, 0, 0, 0, 0},
-		.config_T27 = {0, 0, 0, 0, 0, 0, 0},
 		.config_T28 = {0, 0, 3, 4, 8, 60},
 		.object_crc = {0xEA, 0x0B, 0x22},
 		.cal_tchthr = {50, 55},
 		.cable_config = {35, 25, 8, 16},
-		.wlc_config = {20, 20, 50, 50, 40, 18, 18},
-		.wlc_freq = {0, 38, 48, 255, 255},
+		.wlc_config = {20, 20, 50, 60, 50, 22, 22},
+		.wlc_freq = {38, 48, 58, 255, 255},
 		.GCAF_level = {20, 24, 28, 40, 63},
 	},
 	{
@@ -891,10 +891,11 @@ struct atmel_i2c_platform_data mecha_ts_atmel_data[] = {
 		.config_T8 = {10, 0, 5, 2, 0, 0, 5, 25},
 		.config_T9 = {139, 0, 0, 19, 11, 0, 16, 30, 3, 1, 0, 5, 2, 0, 4, 20, 10, 10, 0, 0, 0, 0, 250, 3, 42, 50, 143, 50, 135, 65, 40},
 		.config_T15 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-		.config_T19 = {3, 0, 0, 52, 0, 0, 0, 0, 0, 0, 0, 0},
+		.config_T18 = {0, 0},
+		.config_T19 = {3, 0, 0, 52, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		.config_T20 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		.config_T22 = {15, 0, 0, 0, 0, 0, 0, 0, 25, 0, 0, 0, 7, 18, 255, 255, 0},
-		.config_T23 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		.config_T23 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		.config_T24 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		.config_T25 = {3, 0, 40, 35, 136, 19, 0, 0, 0, 0, 0, 0, 0, 0},
 		.config_T27 = {0, 0, 0, 0, 0, 0, 0},
@@ -925,6 +926,12 @@ struct smsc251x_platform_data mecha_smsc251x_data = {
 	.register_switch_func	= mecha_smsc251x_switch_register,
 };
 
+static struct tpa2051d3_platform_data tpa2051d3_platform_data = {
+};
+
+static struct tps65200_platform_data tps65200_data = {
+};
+
 static struct i2c_board_info i2c_devices[] = {
 	{
 		I2C_BOARD_INFO(ATMEL_QT602240_NAME, 0x94 >> 1),
@@ -933,9 +940,11 @@ static struct i2c_board_info i2c_devices[] = {
 	},
 	{
 		I2C_BOARD_INFO(TPA2051D3_I2C_NAME, 0xE0 >> 1),
+		.platform_data = &tpa2051d3_platform_data,
 	},
 	{
 		I2C_BOARD_INFO("tps65200", 0xD4 >> 1),
+		.platform_data = &tps65200_data,
 	},
 	{
 		I2C_BOARD_INFO(SMSC251X_NAME, 0x58 >> 1),
@@ -1190,6 +1199,7 @@ static void s5k3h1gx_clk_switch(void){
 	return;
 }
 
+#ifdef CONFIG_S5K6AAFX
 static void s5k6aafx_clk_switch(void){
 	int rc = 0;
 	pr_info("Doing clk switch (s5k6aafx)\n");
@@ -1203,6 +1213,7 @@ static void s5k6aafx_clk_switch(void){
 	gpio_free(CLK_SWITCH);
 	return;
 }
+#endif
 
 static struct camera_flash_cfg msm_camera_sensor_flash_cfg = {
 	.camera_flash = flashlight_control,
@@ -2020,6 +2031,8 @@ static int msm_qsd_spi_dma_config(void)
 #endif
 static struct msm_spi_platform_data qsd_spi_pdata = {
 	.max_clock_speed = 26000000,
+	.clk_name = "spi_clk",
+	.pclk_name = "spi_pclk",
 	.gpio_config  = msm_qsd_spi_gpio_config,
 	.gpio_release = msm_qsd_spi_gpio_release,
 //	.dma_config = msm_qsd_spi_dma_config,
@@ -2613,7 +2626,7 @@ static void __init mecha_init(void)
 	printk("mecha_init() revision=%d\n", system_rev);
 	printk(KERN_INFO "%s: microp version = %s\n", __func__, microp_ver);
 
-	if (!(kernel_flag & BIT0))
+	if (!(get_kernel_flag() & BIT0))
 		msm_hw_reset_hook = mecha_reset;
 	else
 		printk("mecha_init(): Skip the msm_hw_reset_hook for JTAG debugging...\n");
@@ -2666,7 +2679,7 @@ static void __init mecha_init(void)
 	i2c_register_board_info(4 /* QUP ID */, msm_camera_boardinfo,
 				ARRAY_SIZE(msm_camera_boardinfo));
 
-	msm_init_pmic_vibrator();
+	msm_init_pmic_vibrator(3000);
 #ifdef CONFIG_MICROP_COMMON
 	mecha_microp_init();
 #endif
@@ -2755,19 +2768,6 @@ static void __init mecha_init(void)
 	mecha_wifi_init();
 	mecha_init_panel();
 }
-
-static int kernel_flag_boot_config(char *str)
-{
-	if (!str)
-		return -EINVAL;
-
-	kernel_flag = simple_strtoul(str, NULL, 16);
-
-	printk("Board-mecha: %s(): get kernel_flag=0x%x\n", __func__, kernel_flag);
-
-	return 0;
-}
-early_param("kernelflag", kernel_flag_boot_config);
 
 static void __init mecha_fixup(struct machine_desc *desc, struct tag *tags,
 				 char **cmdline, struct meminfo *mi)

@@ -40,7 +40,7 @@ struct s5k3h1gx_i2c_reg_conf s5k3h1gx_common_settings_array_mipi[] =
   { 0x310D , 0xC6 },
   { 0x30C3 , 0x40 },
   { 0x308E , 0x01 },
-  { 0x308F , 0x88 },
+  { 0x308F , 0x8F },
   { 0x30BB , 0x02 },
   { 0x30C7 , 0x1A },
   { 0x30BC , 0x38 },
@@ -115,6 +115,7 @@ struct s5k3h1gx_i2c_reg_conf s5k3h1gx_common_settings_array_mipi[] =
   { 0x0301 , 0x05 }, /* vt_pix_clk_div = 5 */
   { 0x030B , 0x01 }, /* op_sys_clk_div = 1 */
   { 0x0309 , 0x05 }, /* op_pix_clk_div = 5 */
+  { 0x30C9 , 0x01 }, /* mipi voltage driving strength 10% increase */
   { 0x30CC , 0xA0 }, /* DPHY_band_ctrl 560 ~ 640Mbps */
 };
 
@@ -127,7 +128,7 @@ struct s5k3h1gx_i2c_reg_conf s5k3h1gx_common_settings_array_parallel[] =
   { 0x310E , 0x08 },  /* reg_sel 08h:parallel / 04h: CCP / 00h : MIPI */
   { 0x0111 , 0x01 },  /* CCP2_signalling_mode */
   { 0x308E , 0x01 },
-  { 0x308F , 0x88 },
+  { 0x308F , 0x8F },
   /* Manufacture Setting */
   { 0x3000 , 0x08 },
   { 0x3001 , 0x05 },

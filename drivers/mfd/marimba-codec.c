@@ -60,9 +60,6 @@
 #include <linux/platform_device.h>
 #include <linux/mfd/marimba-codec.h>
 #include <linux/mfd/marimba.h>
-#include <linux/debugfs.h>
-#include <linux/uaccess.h>
-#include <linux/string.h>
 
 #define MARIMBA_CDC_RX_CTL 0x81
 #define MARIMBA_CDC_RX_CTL_ST_EN_MASK 0x20
@@ -152,6 +149,7 @@ static struct adie_codec_register adie_codec_lb_regs[] = {
 struct adie_codec_state {
 	struct adie_codec_path path[ADIE_CODEC_MAX];
 	u32 ref_cnt;
+	u32 usb_state;
 	struct marimba *pdrv_ptr;
 	struct marimba_codec_platform_data *codec_pdata;
 	struct mutex lock;
@@ -276,21 +274,20 @@ static struct adie_codec_vol_cntrl_data adie_codec_vol_cntrl[] = {
 static int adie_codec_write(u8 reg, u8 mask, u8 val)
 {
 	int rc;
-
+	/* Avoid to disable PA bias current when usb headset connected */
+	if (adie_codec.usb_state && reg == 0x33) {
+		mask |= 0x8f;
+		val |= 0x8f;
+	}
 	rc = marimba_write_bit_mask(adie_codec.pdrv_ptr, reg,  &val, 1, mask);
 	if (IS_ERR_VALUE(rc)) {
-		pr_err("%s: fail to write reg %x\n", __func__, reg);
+		pr_aud_err("%s: fail to write reg %x\n", __func__, reg);
 		return -EIO;
 	}
 
 	pr_debug("%s: write reg %x val %x\n", __func__, reg, val);
 
 	return 0;
-}
-
-static int adie_codec_read(u8 reg, u8 *val)
-{
-	return marimba_read(adie_codec.pdrv_ptr, reg, val, 1);
 }
 
 static int adie_codec_read_dig_vol(enum adie_vol_type vol_type, u32 chan_index,
@@ -312,7 +309,7 @@ static int adie_codec_read_dig_vol(enum adie_vol_type vol_type, u32 chan_index,
 	rc = marimba_read(adie_codec.pdrv_ptr, reg, &cur_val, 1);
 
 	if (IS_ERR_VALUE(rc)) {
-		pr_err("%s: fail to read reg %x\n", __func__, reg);
+		pr_aud_err("%s: fail to read reg %x\n", __func__, reg);
 		return -EIO;
 	}
 
@@ -332,7 +329,7 @@ static int adie_codec_read_dig_vol(enum adie_vol_type vol_type, u32 chan_index,
 		}
 	}
 
-	pr_err("%s: could not find 0x%x in reg 0x%x values array\n",
+	pr_aud_err("%s: could not find 0x%x in reg 0x%x values array\n",
 			__func__, cur_val, reg);
 
 	return -EINVAL;;
@@ -379,7 +376,7 @@ static int adie_codec_set_dig_vol(enum adie_vol_type vol_type, u32 chan_index,
 
 			rc = adie_codec_write(reg, mask, val);
 			if (rc < 0) {
-				pr_err("%s: write reg %x val 0x%x failed\n",
+				pr_aud_err("%s: write reg %x val 0x%x failed\n",
 					__func__, reg, val);
 				return rc;
 			}
@@ -395,7 +392,7 @@ static int adie_codec_set_dig_vol(enum adie_vol_type vol_type, u32 chan_index,
 		rc = adie_codec_write(reg, mask, val);
 
 		if (rc < 0) {
-			pr_err("%s: write reg %x val 0x%x failed\n",
+			pr_aud_err("%s: write reg %x val 0x%x failed\n",
 					__func__, reg, val);
 			return rc;
 		}
@@ -419,7 +416,7 @@ static int adie_codec_set_dig_vol(enum adie_vol_type vol_type, u32 chan_index,
 
 			rc = adie_codec_write(reg, mask, val);
 			if (rc < 0) {
-				pr_err("%s: write reg %x val 0x%x failed\n",
+				pr_aud_err("%s: write reg %x val 0x%x failed\n",
 					__func__, reg, val);
 				return rc;
 			}
@@ -435,7 +432,7 @@ static int adie_codec_set_dig_vol(enum adie_vol_type vol_type, u32 chan_index,
 		rc = adie_codec_write(reg, mask, val);
 
 		if (rc < 0) {
-			pr_err("%s: write reg %x val 0x%x failed\n",
+			pr_aud_err("%s: write reg %x val 0x%x failed\n",
 					__func__, reg, val);
 			return rc;
 		}
@@ -453,13 +450,13 @@ int adie_codec_set_device_digital_volume(struct adie_codec_path *path_ptr,
 	u32 cur_step_index = 0;
 
 	if (path_ptr->curr_stage != ADIE_CODEC_DIGITAL_ANALOG_READY) {
-		pr_info("%s: Marimba codec not ready for volume control \n",
+		pr_aud_info("%s: Marimba codec not ready for volume control \n",
 		       __func__);
 		return  -EPERM;
 	}
 
 	if (num_channels > 2) {
-		pr_err("%s: Marimba codec only supports max two channels\n",
+		pr_aud_err("%s: Marimba codec only supports max two channels\n",
 		       __func__);
 		return -EINVAL;
 	}
@@ -469,7 +466,7 @@ int adie_codec_set_device_digital_volume(struct adie_codec_path *path_ptr,
 	else if (path_ptr->profile->path_type == ADIE_CODEC_TX)
 		vol_type = ADIE_CODEC_TX_DIG_VOL;
 	else {
-		pr_err("%s: invalid device data neither RX nor TX\n",
+		pr_aud_err("%s: invalid device data neither RX nor TX\n",
 				__func__);
 		return -EINVAL;
 	}
@@ -515,7 +512,7 @@ EXPORT_SYMBOL(adie_codec_set_device_digital_volume);
 int adie_codec_set_device_analog_volume(struct adie_codec_path *path_ptr,
 		u32 num_channels, u32 volume /* in percentage */)
 {
-	pr_err("%s: analog device volume not supported\n", __func__);
+	pr_aud_err("%s: analog device volume not supported\n", __func__);
 
 	return -EPERM;
 }
@@ -587,12 +584,12 @@ int adie_codec_enable_sidetone(struct adie_codec_path *rx_path_ptr,
 	mutex_lock(&adie_codec.lock);
 
 	if (!rx_path_ptr || &adie_codec.path[ADIE_CODEC_RX] != rx_path_ptr) {
-		pr_err("%s: invalid path pointer\n", __func__);
+		pr_aud_err("%s: invalid path pointer\n", __func__);
 		rc = -EINVAL;
 		goto error;
 	} else if (rx_path_ptr->curr_stage !=
 		ADIE_CODEC_DIGITAL_ANALOG_READY) {
-		pr_err("%s: bad state\n", __func__);
+		pr_aud_err("%s: bad state\n", __func__);
 		rc = -EPERM;
 		goto error;
 	}
@@ -642,7 +639,7 @@ int adie_codec_proceed_stage(struct adie_codec_path *path_ptr, u32 state)
 		case ADIE_CODEC_ACTION_ENTRY:
 			ADIE_CODEC_UNPACK_ENTRY(curr_action->action,
 			reg, mask, val);
-			rc = adie_codec_write(reg, mask, val);
+			adie_codec_write(reg, mask, val);
 			break;
 		case ADIE_CODEC_ACTION_DELAY_WAIT:
 			if (curr_action->action > MAX_MDELAY_US)
@@ -673,47 +670,6 @@ int adie_codec_proceed_stage(struct adie_codec_path *path_ptr, u32 state)
 }
 EXPORT_SYMBOL(adie_codec_proceed_stage);
 
-static void marimba_codec_bring_up(void)
-{
-	/* bring up sequence for Marimba codec core
-	 * ensure RESET_N = 0 and GDFS_CLAMP_EN=1 -
-	 * set GDFS_EN_FEW=1 then GDFS_EN_REST=1 then
-	 * GDFS_CLAMP_EN = 0 and finally RESET_N = 1
-	 * Marimba codec bring up should use the Marimba
-	 * slave address after which the codec slave
-	 * address can be used
-	 */
-
-	/* Bring up codec */
-	adie_codec_write(0xFF, 0xFF, 0x08);
-
-	/* set GDFS_EN_FEW=1 */
-	adie_codec_write(0xFF, 0xFF, 0x0a);
-
-	/* set GDFS_EN_REST=1 */
-	adie_codec_write(0xFF, 0xFF, 0x0e);
-
-	/* set RESET_N=1 */
-	adie_codec_write(0xFF, 0xFF, 0x07);
-
-	adie_codec_write(0xFF, 0xFF, 0x17);
-
-	/* enable band gap */
-	adie_codec_write(0x03, 0xFF, 0x04);
-
-	/* dither delay selected and dmic gain stage bypassed */
-	adie_codec_write(0x8F, 0xFF, 0x44);
-}
-
-static void marimba_codec_bring_down(void)
-{
-	adie_codec_write(0xFF, 0xFF, 0x07);
-	adie_codec_write(0xFF, 0xFF, 0x06);
-	adie_codec_write(0xFF, 0xFF, 0x0e);
-	adie_codec_write(0xFF, 0xFF, 0x08);
-	adie_codec_write(0x03, 0xFF, 0x00);
-}
-
 int adie_codec_open(struct adie_codec_dev_profile *profile,
 	struct adie_codec_path **path_pptr)
 {
@@ -738,12 +694,41 @@ int adie_codec_open(struct adie_codec_dev_profile *profile,
 
 			rc = adie_codec.codec_pdata->marimba_codec_power(1);
 			if (rc) {
-				pr_err("%s: could not power up marimba "
+				pr_aud_err("%s: could not power up marimba "
 						"codec\n", __func__);
 				goto error;
 			}
 		}
-		marimba_codec_bring_up();
+
+		/* bring up sequence for Marimba codec core
+		 * ensure RESET_N = 0 and GDFS_CLAMP_EN=1 -
+		 * set GDFS_EN_FEW=1 then GDFS_EN_REST=1 then
+		 * GDFS_CLAMP_EN = 0 and finally RESET_N = 1
+		 * Marimba codec bring up should use the Marimba
+		 * slave address after which the codec slave
+		 * address can be used
+		 */
+
+		/* Bring up codec */
+		adie_codec_write(0xFF, 0xFF, 0x08);
+
+		/* set GDFS_EN_FEW=1 */
+		adie_codec_write(0xFF, 0xFF, 0x0a);
+
+		/* set GDFS_EN_REST=1 */
+		adie_codec_write(0xFF, 0xFF, 0x0e);
+
+		/* set RESET_N=1 */
+		adie_codec_write(0xFF, 0xFF, 0x07);
+
+		adie_codec_write(0xFF, 0xFF, 0x17);
+
+		/* enable band gap */
+		adie_codec_write(0x03, 0xFF, 0x04);
+
+		/* dither delay selected and dmic gain stage bypassed */
+		adie_codec_write(0x8F, 0xFF, 0x44);
+
 	}
 
 	adie_codec.path[profile->path_type].profile = profile;
@@ -781,33 +766,120 @@ int adie_codec_close(struct adie_codec_path *path_ptr)
 
 	if (!adie_codec.ref_cnt) {
 
-		marimba_codec_bring_down();
+		adie_codec_write(0xFF, 0xFF, 0x07);
+		adie_codec_write(0xFF, 0xFF, 0x06);
+		adie_codec_write(0xFF, 0xFF, 0x0e);
+		adie_codec_write(0xFF, 0xFF, 0x08);
+		adie_codec_write(0x03, 0xFF, 0x00);
 
 		if (adie_codec.codec_pdata &&
 				adie_codec.codec_pdata->marimba_codec_power) {
 
 			rc = adie_codec.codec_pdata->marimba_codec_power(0);
 			if (rc) {
-				pr_err("%s: could not power down marimba "
+				pr_aud_err("%s: could not power down marimba "
 						"codec\n", __func__);
 				goto error;
 			}
 		}
 	}
-
 error:
 	mutex_unlock(&adie_codec.lock);
 	return rc;
 }
 EXPORT_SYMBOL(adie_codec_close);
 
+int usb_headset_adie_enable(int enable)
+{
+	int rc = 0;
+	mutex_lock(&adie_codec.lock);
+	if (!adie_codec.ref_cnt && enable) {
+
+		if (adie_codec.codec_pdata &&
+				adie_codec.codec_pdata->marimba_codec_power) {
+
+			rc = adie_codec.codec_pdata->marimba_codec_power(1);
+			if (rc) {
+				pr_aud_err("%s: could not power up marimba "
+						"codec\n", __func__);
+				goto error;
+			}
+		}
+
+		/* bring up sequence for Marimba codec core
+		 * ensure RESET_N = 0 and GDFS_CLAMP_EN=1 -
+		 * set GDFS_EN_FEW=1 then GDFS_EN_REST=1 then
+		 * GDFS_CLAMP_EN = 0 and finally RESET_N = 1
+		 * Marimba codec bring up should use the Marimba
+		 * slave address after which the codec slave
+		 * address can be used
+		 */
+
+		/* Bring up codec */
+		adie_codec_write(0xFF, 0xFF, 0x08);
+		/* set GDFS_EN_FEW=1 */
+		adie_codec_write(0xFF, 0xFF, 0x0a);
+		/* set GDFS_EN_REST=1 */
+		adie_codec_write(0xFF, 0xFF, 0x0e);
+		/* set RESET_N=1 */
+		adie_codec_write(0xFF, 0xFF, 0x07);
+		adie_codec_write(0xFF, 0xFF, 0x17);
+		/* enable band gap */
+		adie_codec_write(0x03, 0xFF, 0x04);
+		/* dither delay selected and dmic gain stage bypassed */
+		adie_codec_write(0x8F, 0xFF, 0x44);
+		/* usb audio adie parameter */
+
+		adie_codec_write(0x8a, 0xFF, 0x03);
+		adie_codec_write(0x83, 0xFF, 0x00);
+		adie_codec_write(0x33, 0xFF, 0x8f);
+		mdelay(30);
+		adie_codec.usb_state = 1;
+		adie_codec.ref_cnt++;
+		pr_aud_err("usb adie enabled\n");
+	} else if (enable) {
+		adie_codec.ref_cnt++;
+		adie_codec.usb_state = 1;
+	} else if (!enable && adie_codec.ref_cnt > 1) {
+		adie_codec.ref_cnt--;
+		adie_codec.usb_state = 0;
+	} else if (!enable && adie_codec.ref_cnt == 1) {
+		adie_codec.ref_cnt = 0;
+		adie_codec.usb_state = 0;
+		adie_codec_write(0x8a, 0x03, 0x03);
+		adie_codec_write(0x33, 0xFF, 0x03);
+		adie_codec_write(0x33, 0xFF, 0x00);
+		adie_codec_write(0xFF, 0xFF, 0x07);
+		adie_codec_write(0xFF, 0xFF, 0x06);
+		adie_codec_write(0xFF, 0xFF, 0x0e);
+		adie_codec_write(0xFF, 0xFF, 0x08);
+		adie_codec_write(0x03, 0xFF, 0x00);
+
+		if (adie_codec.codec_pdata &&
+				adie_codec.codec_pdata->marimba_codec_power) {
+
+			rc = adie_codec.codec_pdata->marimba_codec_power(0);
+			if (rc) {
+				pr_aud_err("%s: could not power down marimba "
+						"codec\n", __func__);
+				goto error;
+			}
+		}
+		pr_aud_err("usb headset adie disabled");
+	}
+error:
+	mutex_unlock(&adie_codec.lock);
+	return rc;
+}
+EXPORT_SYMBOL(usb_headset_adie_enable);
+
 static int marimba_codec_probe(struct platform_device *pdev)
 {
-	pr_info("%s\n", __func__);
+	pr_aud_info("%s\n", __func__);
 	adie_codec.pdrv_ptr = platform_get_drvdata(pdev);
 	adie_codec.codec_pdata = pdev->dev.platform_data;
 	if (adie_codec.pdrv_ptr == NULL)
-		pr_err("\n\n\n============ adie_codec.pdrv_ptr == NULL ========\n\n\n");
+		pr_aud_err("\n\n\n============ adie_codec.pdrv_ptr == NULL ========\n\n\n");
 
 	return 0;
 }
@@ -820,135 +892,11 @@ static struct platform_driver marimba_codec_driver = {
 	},
 };
 
-#ifdef CONFIG_DEBUG_FS
-static struct dentry *debugfs_marimba_dent;
-static struct dentry *debugfs_peek;
-static struct dentry *debugfs_poke;
-static struct dentry *debugfs_power;
-static unsigned char dump_reg[] = {0x03, 0x0d, 0x0e, 0x0f, 0x1a, 0x24, 0x2b, 0x2c, 0x33,
-		0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3b, 0x3c, 0x80, 0x81, 0x82, 0x83,
-		0x84, 0x85, 0x86, 0x87, 0x8a, 0x8b, 0x8c, 0x91};
-static unsigned char read_all_data[sizeof(dump_reg)];
-
-static int codec_debug_open(struct inode *inode, struct file *file)
-{
-	file->private_data = inode->i_private;
-	return 0;
-}
-
-static int get_parameters(char *buf, long int *param1, int num_of_par)
-{
-	char *token;
-	int base, cnt;
-
-	token = strsep(&buf, " ");
-
-	for (cnt = 0; cnt < num_of_par; cnt++) {
-		if (token != NULL) {
-			if ((token[1] == 'x') || (token[1] == 'X'))
-				base = 16;
-			else
-				base = 10;
-
-			if (strict_strtoul(token, base, &param1[cnt]) != 0)
-				return -EINVAL;
-
-			token = strsep(&buf, " ");
-			}
-		else
-			return -EINVAL;
-	}
-	return 0;
-}
-
-static ssize_t codec_debug_read(struct file *file, char __user *ubuf,
-				size_t count, loff_t *ppos)
-{
-	char lbuf[256];
-	int i = 0;
-	int offset = 0;
-	for (i = 0; i < sizeof(dump_reg); i++)
-			offset += sprintf(lbuf + offset, "%x=0x%x\n" ,dump_reg[i] , read_all_data[i]);
-	lbuf[offset-1] = '\n';
-	return simple_read_from_buffer(ubuf, count, ppos, lbuf, strlen(lbuf));
-}
-
-static ssize_t codec_debug_write(struct file *filp,
-	const char __user *ubuf, size_t cnt, loff_t *ppos)
-{
-	char *access_str = filp->private_data;
-	char lbuf[32];
-	int rc;
-	int i;
-	long int param[5];
-
-	if (cnt > sizeof(lbuf) - 1)
-		return -EINVAL;
-
-	rc = copy_from_user(lbuf, ubuf, cnt);
-	if (rc)
-		return -EFAULT;
-
-	lbuf[cnt] = '\0';
-
-	if (!strcmp(access_str, "power")) {
-		if (get_parameters(lbuf, param, 1) == 0) {
-			switch (param[0]) {
-			case 1:
-				adie_codec.codec_pdata->marimba_codec_power(1);
-				marimba_codec_bring_up();
-				break;
-			case 0:
-				marimba_codec_bring_down();
-				adie_codec.codec_pdata->marimba_codec_power(0);
-				break;
-			default:
-				rc = -EINVAL;
-				break;
-			}
-		} else
-			rc = -EINVAL;
-	} else if (!strcmp(access_str, "poke")) {
-		/* write */
-		rc = get_parameters(lbuf, param, 2);
-		if ((param[0] <= 0xFF) && (param[1] <= 0xFF) &&
-			(rc == 0))
-			adie_codec_write(param[0], 0xFF, param[1]);
-		else
-			rc = -EINVAL;
-	} else if (!strcmp(access_str, "peek")) {
-		/* read */
-		rc = get_parameters(lbuf, param, 1);
-		if ((param[0] < 0xFF) && (rc == 0))
-			adie_codec_read(param[0], &read_all_data[0]);
-		else if ((param[0] == 0xFF) && (rc == 0)) {
-			for (i = 0; i < sizeof(read_all_data); i++) {
-				adie_codec_read(dump_reg[i], &read_all_data[i]);
-			}
-		} else
-			rc = -EINVAL;
-	}
-
-	if (rc == 0)
-		rc = cnt;
-	else
-		pr_err("%s: rc = %d\n", __func__, rc);
-
-	return rc;
-}
-
-static const struct file_operations codec_debug_ops = {
-	.open = codec_debug_open,
-	.write = codec_debug_write,
-	.read = codec_debug_read
-};
-#endif
-
 static int __init marimba_codec_init(void)
 {
 	s32 rc;
 
-	pr_info("%s\n", __func__);
+	pr_aud_info("%s\n", __func__);
 	rc = platform_driver_register(&marimba_codec_driver);
 	if (IS_ERR_VALUE(rc))
 		goto error;
@@ -963,36 +911,12 @@ static int __init marimba_codec_init(void)
 	adie_codec.path[ADIE_CODEC_LB].img.img_sz =
 	ARRAY_SIZE(adie_codec_lb_regs);
 	mutex_init(&adie_codec.lock);
-
-#ifdef CONFIG_DEBUG_FS
-	debugfs_marimba_dent = debugfs_create_dir("marimba_codec", 0);
-	if (!IS_ERR(debugfs_marimba_dent)) {
-		debugfs_peek = debugfs_create_file("peek",
-		S_IFREG | S_IRUGO, debugfs_marimba_dent,
-		(void *) "peek", &codec_debug_ops);
-
-		debugfs_poke = debugfs_create_file("poke",
-		S_IFREG | S_IRUGO, debugfs_marimba_dent,
-		(void *) "poke", &codec_debug_ops);
-
-		debugfs_power = debugfs_create_file("power",
-		S_IFREG | S_IRUGO, debugfs_marimba_dent,
-		(void *) "power", &codec_debug_ops);
-	}
-#endif
-
 error:
 	return rc;
 }
 
 static void __exit marimba_codec_exit(void)
 {
-#ifdef CONFIG_DEBUG_FS
-	debugfs_remove(debugfs_peek);
-	debugfs_remove(debugfs_poke);
-	debugfs_remove(debugfs_power);
-	debugfs_remove(debugfs_marimba_dent);
-#endif
 	platform_driver_unregister(&marimba_codec_driver);
 }
 

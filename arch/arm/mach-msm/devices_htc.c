@@ -40,6 +40,12 @@
 #include <mach/dal_axi.h>
 #include "proc_comm.h"
 
+static char *df_serialno = "000000000000";
+static char *board_sn;
+
+#define MFG_GPIO_TABLE_MAX_SIZE        0x400
+static unsigned char mfg_gpio_table[MFG_GPIO_TABLE_MAX_SIZE];
+
 #ifndef CONFIG_ARCH_MSM7X30
 struct platform_device *devices[] __initdata = {
 	&msm_device_nand,
@@ -55,13 +61,13 @@ void __init msm_add_devices(void)
 
 static struct android_pmem_platform_data pmem_pdata = {
 	.name = "pmem",
-	.no_allocator = 1,
+	.no_allocator = PMEM_ALLOCATORTYPE_ALLORNOTHING,
 	.cached = 1,
 };
 
 static struct android_pmem_platform_data pmem_adsp_pdata = {
 	.name = "pmem_adsp",
-	.no_allocator = 0,
+	.no_allocator = PMEM_ALLOCATORTYPE_BITMAP,
 #if defined(CONFIG_ARCH_MSM7227)
 	.cached = 1,
 #else
@@ -71,7 +77,7 @@ static struct android_pmem_platform_data pmem_adsp_pdata = {
 
 static struct android_pmem_platform_data pmem_camera_pdata = {
 	.name = "pmem_camera",
-	.no_allocator = 0,
+	.no_allocator = PMEM_ALLOCATORTYPE_BITMAP,
 	.cached = 0,
 };
 
@@ -160,7 +166,7 @@ static struct platform_device hw3d_device = {
 };
 #endif
 
-#if defined(CONFIG_GPU_MSM_KGSL)
+#if defined(CONFIG_GPU_MSM_KGSL) && !defined(CONFIG_ARCH_MSM8X60)
 static struct resource msm_kgsl_resources[] = {
 	{
 		.name	= "kgsl_reg_memory",
@@ -185,13 +191,13 @@ static struct resource msm_kgsl_resources[] = {
 	},
 #ifdef CONFIG_ARCH_MSM7X30
 	{
-		.name   = "kgsl_g12_reg_memory",
+		.name   = "kgsl_2d0_reg_memory",
 		.start  = MSM_GPU_2D_REG_PHYS, /* Z180 base address */
 		.end    = MSM_GPU_2D_REG_PHYS + MSM_GPU_2D_REG_SIZE - 1,
 		.flags  = IORESOURCE_MEM,
 	},
 	{
-		.name   = "kgsl_g12_irq",
+		.name   = "kgsl_2d0_irq",
 		.start  = INT_GRP_2D,
 		.end    = INT_GRP_2D,
 		.flags  = IORESOURCE_IRQ,
@@ -213,9 +219,22 @@ static struct kgsl_platform_data kgsl_pdata = {
 	.max_grp2d_freq = 0,
 	.min_grp2d_freq = 0,
 	.set_grp2d_async = NULL, /* HW workaround, run Z180 SYNC @ 192 MHZ */
-	.max_grp3d_freq = 245000000,
+	.max_grp3d_freq = 245760000,
 	.min_grp3d_freq = 192000000,
 	.set_grp3d_async = set_grp3d_async,
+	.imem_clk_name = "imem_clk",
+	.grp3d_clk_name = "grp_clk",
+	.grp2d0_clk_name = "grp_2d_clk",
+#ifdef CONFIG_KGSL_PER_PROCESS_PAGE_TABLE
+	.pt_va_size = SZ_128M - SZ_64K,
+	/* Maximum of 32 concurrent processes */
+	.pt_max_count = 32,
+#else
+	.pt_va_size = SZ_128M,
+	/* We only ever have one pagetable for everybody */
+	.pt_max_count = 1,
+
+#endif
 };
 #endif
 
@@ -297,7 +316,7 @@ void __init msm_add_mem_devices(struct msm_pmem_setting *setting)
 		platform_device_register(&ram_console_device);
 	}
 
-#if defined(CONFIG_GPU_MSM_KGSL)
+#if defined(CONFIG_GPU_MSM_KGSL)&& !defined(CONFIG_ARCH_MSM8X60)
 	if (setting->kgsl_size) {
 		msm_kgsl_resources[1].start = setting->kgsl_start;
 		msm_kgsl_resources[1].end = setting->kgsl_start
@@ -328,6 +347,7 @@ void __init msm_add_mem_devices(struct msm_pmem_setting *setting)
 
 #if 1
 static struct platform_device *msm_serial_devices[] __initdata = {
+#ifndef CONFIG_ARCH_MSM8X60
 	&msm_device_uart1,
 	&msm_device_uart2,
 	&msm_device_uart3,
@@ -335,7 +355,50 @@ static struct platform_device *msm_serial_devices[] __initdata = {
 	&msm_device_uart_dm1,
 	&msm_device_uart_dm2,
 	#endif
+#endif
 };
+
+#ifdef CONFIG_ARCH_MSM8X60
+static struct msm_mem_settings mem_settings[] = {
+	/* First is default settings. */
+	{
+		.mem_size_mb = 768,
+		.mem_info = {
+			.nr_banks = 2,
+			.bank = {
+				[0] = {
+					.start = 0x40400000,
+					.node = PHYS_TO_NID(0x40400000),
+					.size = 0x42E00000 - 0x40400000,
+				},
+				[1] = {
+					.start = 0x48000000,
+					.node = PHYS_TO_NID(0x48000000),
+					.size = 0x70000000 - 0x48000000,
+				}
+			}
+		}
+	},
+	{
+		.mem_size_mb = 1024,
+		.mem_info = {
+			.nr_banks = 2,
+			.bank = {
+				[0] = {
+					.start = 0x40400000,
+					.node = PHYS_TO_NID(0x40400000),
+					.size = 0x42E00000 - 0x40400000,
+				},
+				[1] = {
+					.start = 0x48000000,
+					.node = PHYS_TO_NID(0x48000000),
+					.size = 0x80000000 - 0x48000000,
+				}
+			}
+		}
+	}
+};
+#endif
 
 int __init msm_add_serial_devices(unsigned num)
 {
@@ -474,10 +537,375 @@ static int __init parse_tag_ps_calibration(const struct tag *tag)
 	ps_kparam1 = tag->u.serialnr.low;
 	ps_kparam2 = tag->u.serialnr.high;
 
-	printk(KERN_DEBUG "%s: ps_kparam1 = 0x%x, ps_kparam2 = 0x%x\n",
+	printk(KERN_INFO "%s: ps_kparam1 = 0x%x, ps_kparam2 = 0x%x\n",
 		__func__, ps_kparam1, ps_kparam2);
 
 	return 0;
 }
 
 __tagtable(ATAG_PS, parse_tag_ps_calibration);
+
+unsigned int als_kadc;
+EXPORT_SYMBOL(als_kadc);
+
+static int __init parse_tag_als_calibration(const struct tag *tag)
+{
+	als_kadc = tag->u.als_kadc.kadc;
+
+	return 0;
+}
+
+__tagtable(ATAG_ALS, parse_tag_als_calibration);
+
+/* CSA sensor calibration values */
+#define ATAG_CSA	0x5441001f
+
+unsigned int csa_kvalue1;
+EXPORT_SYMBOL(csa_kvalue1);
+
+unsigned int csa_kvalue2;
+EXPORT_SYMBOL(csa_kvalue2);
+
+unsigned int csa_kvalue3;
+EXPORT_SYMBOL(csa_kvalue3);
+
+static int __init parse_tag_csa_calibration(const struct tag *tag)
+{
+	unsigned int *ptr = (unsigned int *)&tag->u;
+	csa_kvalue1 = ptr[0];
+	csa_kvalue2 = ptr[1];
+	csa_kvalue3 = ptr[2];
+
+	printk(KERN_DEBUG "csa_kvalue1 = 0x%x, csa_kvalue2 = 0x%x, "
+	"csa_kvalue3 = 0x%x\n", csa_kvalue1, csa_kvalue2, csa_kvalue3);
+
+	return 0;
+}
+__tagtable(ATAG_CSA, parse_tag_csa_calibration);
+
+/* Gyro/G-senosr calibration values */
+#define ATAG_GRYO_GSENSOR	0x54410020
+unsigned char gyro_gsensor_kvalue[37];
+EXPORT_SYMBOL(gyro_gsensor_kvalue);
+
+static int __init parse_tag_gyro_gsensor_calibration(const struct tag *tag)
+{
+	int i;
+	unsigned char *ptr = (unsigned char *)&tag->u;
+	memcpy(&gyro_gsensor_kvalue[0], ptr, sizeof(gyro_gsensor_kvalue));
+
+	printk(KERN_DEBUG "gyro_gs data\n");
+	for (i = 0; i < sizeof(gyro_gsensor_kvalue); i++)
+		printk(KERN_DEBUG "[%d]:0x%x", i, gyro_gsensor_kvalue[i]);
+
+	return 0;
+}
+__tagtable(ATAG_GRYO_GSENSOR, parse_tag_gyro_gsensor_calibration);
+
+static int mfg_mode;
+int __init board_mfg_mode_init(char *s)
+{
+	if (!strcmp(s, "normal"))
+		mfg_mode = 0;
+	else if (!strcmp(s, "factory2"))
+		mfg_mode = 1;
+	else if (!strcmp(s, "recovery"))
+		mfg_mode = 2;
+	else if (!strcmp(s, "charge"))
+		mfg_mode = 3;
+	else if (!strcmp(s, "power_test"))
+		mfg_mode = 4;
+	else if (!strcmp(s, "offmode_charging"))
+		mfg_mode = 5;
+
+	return 1;
+}
+
+int board_mfg_mode(void)
+{
+	return mfg_mode;
+}
+
+EXPORT_SYMBOL(board_mfg_mode);
+
+__setup("androidboot.mode=", board_mfg_mode_init);
+
+static int build_flag;
+
+static int __init board_bootloader_setup(char *str)
+{
+	char temp[strlen(str) + 1];
+	char *p = NULL;
+	char *build = NULL;
+	char *args = temp;
+
+	printk(KERN_INFO "%s: %s\n", __func__, str);
+
+	strcpy(temp, str);
+
+	/*parse the last parameter*/
+	while ((p = strsep(&args, ".")) != NULL) build = p;
+
+	if (build) {
+		if (strcmp(build, "0000") == 0) {
+			printk(KERN_INFO "%s: SHIP BUILD\n", __func__);
+			build_flag = SHIP_BUILD;
+		} else if (strcmp(build, "2000") == 0) {
+			printk(KERN_INFO "%s: ENG BUILD\n", __func__);
+			build_flag = ENG_BUILD;
+		} else {
+			printk(KERN_INFO "%s: default ENG BUILD\n", __func__);
+			build_flag = ENG_BUILD;
+		}
+	}
+	return 1;
+}
+__setup("androidboot.bootloader=", board_bootloader_setup);
+
+int board_build_flag(void)
+{
+	return build_flag;
+}
+
+EXPORT_SYMBOL(board_build_flag);
+
+static int __init board_serialno_setup(char *serialno)
+{
+	char *str;
+
+	/* use default serial number when mode is factory2 */
+	if (board_mfg_mode() == 1 || !strlen(serialno))
+		str = df_serialno;
+	else
+		str = serialno;
+#ifdef CONFIG_USB_FUNCTION
+	msm_hsusb_pdata.serial_number = str;
+#endif
+	board_sn = str;
+	return 1;
+}
+__setup("androidboot.serialno=", board_serialno_setup);
+
+char *board_serialno(void)
+{
+	return board_sn;
+}
+
+#define ATAG_SKUID 0x4d534D73
+int __init parse_tag_skuid(const struct tag *tags)
+{
+	int skuid = 0, find = 0;
+	struct tag *t = (struct tag *)tags;
+
+	for (; t->hdr.size; t = tag_next(t)) {
+		if (t->hdr.tag == ATAG_SKUID) {
+			printk(KERN_DEBUG "find the skuid tag\n");
+			find = 1;
+			break;
+		}
+	}
+
+	if (find)
+		skuid = t->u.revision.rev;
+	printk(KERN_DEBUG "parse_tag_skuid: hwid = 0x%x\n", skuid);
+	return skuid;
+}
+__tagtable(ATAG_SKUID, parse_tag_skuid);
+
+#define ATAG_HERO_PANEL_TYPE 0x4d534D74
+int panel_type;
+int __init tag_panel_parsing(const struct tag *tags)
+{
+	panel_type = tags->u.revision.rev;
+
+	printk(KERN_DEBUG "%s: panel type = %d\n", __func__,
+		panel_type);
+
+	return panel_type;
+}
+__tagtable(ATAG_HERO_PANEL_TYPE, tag_panel_parsing);
+
+/* ISL29028 ID values */
+#define ATAG_PS_TYPE 0x4d534D77
+int ps_type;
+EXPORT_SYMBOL(ps_type);
+int __init tag_ps_parsing(const struct tag *tags)
+{
+	ps_type = tags->u.revision.rev;
+
+	printk(KERN_DEBUG "%s: PS type = 0x%x\n", __func__,
+		ps_type);
+
+	return ps_type;
+}
+__tagtable(ATAG_PS_TYPE, tag_ps_parsing);
+
+#define ATAG_ENGINEERID 0x4d534D75
+unsigned engineer_id;
+EXPORT_SYMBOL(engineer_id);
+int __init parse_tag_engineerid(const struct tag *tags)
+{
+	int engineerid = 0, find = 0;
+	struct tag *t = (struct tag *)tags;
+
+	for (; t->hdr.size; t = tag_next(t)) {
+		if (t->hdr.tag == ATAG_ENGINEERID) {
+			printk(KERN_DEBUG "find the engineer tag\n");
+			find = 1;
+			break;
+		}
+	}
+
+	if (find) {
+		engineer_id = t->u.revision.rev;
+		engineerid = t->u.revision.rev;
+	}
+	printk(KERN_DEBUG "parse_tag_engineerid: 0x%x\n", engineerid);
+	return engineerid;
+}
+__tagtable(ATAG_ENGINEERID, parse_tag_engineerid);
+
+#define ATAG_MFG_GPIO_TABLE 0x59504551
+int __init parse_tag_mfg_gpio_table(const struct tag *tags)
+{
+       unsigned char *dptr = (unsigned char *)(&tags->u);
+       __u32 size;
+
+       size = min((__u32)(tags->hdr.size - 2) * sizeof(__u32), (__u32)MFG_GPIO_TABLE_MAX_SIZE);
+       memcpy(mfg_gpio_table, dptr, size);
+       return 0;
+}
+__tagtable(ATAG_MFG_GPIO_TABLE, parse_tag_mfg_gpio_table);
+
+char * board_get_mfg_sleep_gpio_table(void)
+{
+        return mfg_gpio_table;
+}
+EXPORT_SYMBOL(board_get_mfg_sleep_gpio_table);
+
+static char *emmc_tag;
+static int __init board_set_emmc_tag(char *get_hboot_emmc)
+{
+	if (strlen(get_hboot_emmc))
+		emmc_tag = get_hboot_emmc;
+	else
+		emmc_tag = NULL;
+	return 1;
+}
+__setup("androidboot.emmc=", board_set_emmc_tag);
+
+int board_emmc_boot(void)
+{
+	if (emmc_tag) {
+		if (!strcmp(emmc_tag, "true"))
+			return 1;
+	}
+
+	return 0;
+}
+
+#define ATAG_MEMSIZE 0x5441001e
+unsigned memory_size;
+int __init parse_tag_memsize(const struct tag *tags)
+{
+	int mem_size = 0, find = 0;
+	struct tag *t = (struct tag *)tags;
+
+	for (; t->hdr.size; t = tag_next(t)) {
+		if (t->hdr.tag == ATAG_MEMSIZE) {
+			printk(KERN_DEBUG "find the memsize tag\n");
+			find = 1;
+			break;
+		}
+	}
+
+	if (find) {
+		memory_size = t->u.revision.rev;
+		mem_size = t->u.revision.rev;
+	}
+	printk(KERN_DEBUG "parse_tag_memsize: %d\n", memory_size);
+	return mem_size;
+}
+__tagtable(ATAG_MEMSIZE, parse_tag_memsize);
+
+int __init parse_tag_extdiag(const struct tag *tags)
+{
+	const struct tag *t = tags;
+
+	for (; t->hdr.size; t = tag_next(t)) {
+		if (t->hdr.tag == 0x54410021)
+			return t->u.revision.rev;
+	}
+	return 0;
+}
+
+#if defined(CONFIG_ARCH_MSM8X60)
+static struct msm_mem_settings *board_find_mem_settings(unsigned mem_size_mb)
+{
+	int index;
+	for (index = 0; index < sizeof(mem_settings) / sizeof(mem_settings[0]); index++) {
+		if (mem_settings[index].mem_size_mb == mem_size_mb) {
+			pr_info("%s: %d MB settings is found.\n", __func__, mem_size_mb);
+			return &mem_settings[index];
+		}
+	}
+	pr_info("%s: use default mem bank settigs.\n", __func__);
+	return &mem_settings[0];
+}
+
+int msm_fixup(struct tag *tags, struct meminfo *mi)
+{
+	unsigned mem_size_mb = parse_tag_memsize((const struct tag *)tags);
+	struct msm_mem_settings *settings = board_find_mem_settings(mem_size_mb);
+	int index = 0;
+
+	pr_info("%s: mem size = %d\n", __func__, mem_size_mb);
+
+	mi->nr_banks = settings->mem_info.nr_banks;
+	for (index = 0; index < settings->mem_info.nr_banks; index++) {
+		mi->bank[index].start = settings->mem_info.bank[index].start;
+		mi->bank[index].node = settings->mem_info.bank[index].node;
+		mi->bank[index].size = settings->mem_info.bank[index].size;
+	}
+	return 0;
+}
+#endif
+
+static unsigned int radio_flag = 0;
+int __init radio_flag_init(char *s)
+{
+	radio_flag = simple_strtoul(s, 0, 16);
+	return 1;
+}
+__setup("radioflag=", radio_flag_init);
+
+unsigned int get_radio_flag(void)
+{
+	return radio_flag;
+}
+
+static unsigned int kernel_flag = 0;
+int __init kernel_flag_init(char *s)
+{
+	kernel_flag = simple_strtoul(s, 0, 16);
+	return 1;
+}
+__setup("kernelflag=", kernel_flag_init);
+
+unsigned int get_kernel_flag(void)
+{
+	return kernel_flag;
+}
+
+BLOCKING_NOTIFIER_HEAD(psensor_notifier_list);
+
+int register_notifier_by_psensor(struct notifier_block *nb)
+{
+	return blocking_notifier_chain_register(&psensor_notifier_list, nb);
+}
+
+int unregister_notifier_by_psensor(struct notifier_block *nb)
+{
+	return blocking_notifier_chain_unregister(&psensor_notifier_list, nb);
+}
+

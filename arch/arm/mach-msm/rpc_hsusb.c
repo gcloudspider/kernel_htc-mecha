@@ -23,6 +23,7 @@
 #include <asm/mach-types.h>
 
 static struct msm_rpc_endpoint *usb_ep;
+static struct msm_rpc_endpoint *chg_ep;
 
 #define MSM_RPC_CHG_PROG 0x3000001a
 
@@ -140,6 +141,7 @@ void msm_hsusb_phy_reset(void)
 	} else
 		pr_info("msm_hsusb_phy_reset\n");
 
+	return;
 }
 EXPORT_SYMBOL(msm_hsusb_phy_reset);
 
@@ -168,3 +170,129 @@ int msm_hsusb_rpc_close(void)
 }
 EXPORT_SYMBOL(msm_hsusb_rpc_close);
 
+/* rpc call to close charging connection */
+int msm_chg_rpc_close(void)
+{
+	int rc = 0;
+
+	if (IS_ERR(chg_ep)) {
+		pr_err("%s: rpc_close failed before call, rc = %ld\n",
+			__func__, PTR_ERR(chg_ep));
+		return -EAGAIN;
+	}
+
+	rc = msm_rpc_close(chg_ep);
+	chg_ep = NULL;
+
+	if (rc < 0) {
+		pr_err("%s: close rpc failed! rc = %d\n",
+			__func__, rc);
+		return -EAGAIN;
+	} else
+		pr_debug("rpc close success\n");
+
+	return rc;
+}
+EXPORT_SYMBOL(msm_chg_rpc_close);
+
+int msm_hsusb_reset_rework_installed(void)
+{
+	int rc = 0;
+	struct hsusb_start_req {
+		struct rpc_request_hdr hdr;
+	} req;
+	struct hsusb_rpc_rep {
+		struct rpc_reply_hdr hdr;
+		uint32_t rework;
+	} rep;
+
+	memset(&rep, 0, sizeof(rep));
+
+	if (!usb_ep || IS_ERR(usb_ep)) {
+		pr_err("%s: hsusb rpc connection not initialized, rc = %ld\n",
+			__func__, PTR_ERR(usb_ep));
+		return -EAGAIN;
+	}
+
+	rc = msm_rpc_call_reply(usb_ep, usb_rpc_ids.reset_rework_installed,
+				&req, sizeof(req),
+				&rep, sizeof(rep), 5 * HZ);
+
+	if (rc < 0) {
+		pr_err("%s: rpc call failed! error: (%d)"
+				"proc id: (%lx)\n",
+				__func__, rc,
+				usb_rpc_ids.reset_rework_installed);
+		return rc;
+	}
+
+	pr_info("%s: rework: (%d)\n", __func__, rep.rework);
+	return be32_to_cpu(rep.rework);
+}
+EXPORT_SYMBOL(msm_hsusb_reset_rework_installed);
+
+static int msm_hsusb_pmic_ulpidata0_config(int enable)
+{
+	int rc = 0;
+	struct hsusb_start_req {
+		struct rpc_request_hdr hdr;
+	} req;
+
+	if (!usb_ep || IS_ERR(usb_ep)) {
+		pr_err("%s: hsusb rpc connection not initialized, rc = %ld\n",
+			__func__, PTR_ERR(usb_ep));
+		return -EAGAIN;
+	}
+
+	if (enable)
+		rc = msm_rpc_call(usb_ep, usb_rpc_ids.enable_pmic_ulpi_data0,
+					&req, sizeof(req), 5 * HZ);
+	else
+		rc = msm_rpc_call(usb_ep, usb_rpc_ids.disable_pmic_ulpi_data0,
+					&req, sizeof(req), 5 * HZ);
+
+	if (rc < 0)
+		pr_err("%s: rpc call failed! error: %d\n",
+				__func__, rc);
+	return rc;
+}
+
+int msm_hsusb_enable_pmic_ulpidata0(void)
+{
+	return msm_hsusb_pmic_ulpidata0_config(1);
+}
+EXPORT_SYMBOL(msm_hsusb_enable_pmic_ulpidata0);
+
+int msm_hsusb_disable_pmic_ulpidata0(void)
+{
+	return msm_hsusb_pmic_ulpidata0_config(0);
+}
+EXPORT_SYMBOL(msm_hsusb_disable_pmic_ulpidata0);
+
+
+#if 0
+/* wrapper for sending pid and serial# info to bootloader */
+int usb_diag_update_pid_and_serial_num(uint32_t pid, const char *snum)
+{
+	int ret;
+
+	ret = msm_hsusb_send_productID(pid);
+	if (ret)
+		return ret;
+
+	if (!snum) {
+		ret = msm_hsusb_is_serial_num_null(1);
+		if (ret)
+			return ret;
+	}
+
+	ret = msm_hsusb_is_serial_num_null(0);
+	if (ret)
+		return ret;
+	ret = msm_hsusb_send_serial_number(snum);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+#endif

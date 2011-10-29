@@ -20,6 +20,7 @@
 #include <linux/workqueue.h>
 #include <linux/spinlock.h>
 #include <linux/platform_device.h>
+#include <linux/slab.h>
 #include <mach/atmega_microp.h>
 
 static int microp_write_led_mode(struct led_classdev *led_cdev,
@@ -134,6 +135,39 @@ static void microp_led_jogball_brightness_set(struct led_classdev *led_cdev,
 	ret = microp_i2c_write(MICROP_I2C_WCMD_JOGBALL_LED_MODE, data, 3);
 	if (ret < 0)
 		pr_err("%s failed on set jogball mode:0x%2.2X\n", __func__, data[0]);
+}
+
+static void microp_led_sharekey_brightness_set(struct led_classdev *led_cdev,
+			       enum led_brightness brightness)
+{
+	struct microp_led_data *ldata;
+	unsigned long flags;
+	uint8_t data[3] = {0, 0, 0};
+	int ret = 0;
+	printk("%s\n",__func__);
+	ldata = container_of(led_cdev, struct microp_led_data, ldev);
+
+	spin_lock_irqsave(&ldata->brightness_lock, flags);
+	ldata->brightness = brightness;
+	spin_unlock_irqrestore(&ldata->brightness_lock, flags);
+
+	switch (brightness) {
+	case 0:
+		printk(KERN_INFO "%s stop\n",__func__);
+		data[0] = 0;
+		break;
+	case 1:
+		printk(KERN_INFO "%s brightness\n",__func__);
+		data[0] = 0x5;
+		data[1] = data[2] = 0x0;
+		break;
+	default:
+		pr_warning("%s: unknown value: %d\n", __func__, brightness);
+		break;
+	}
+	ret = microp_i2c_write(MICROP_I2C_WCMD_JOGBALL_LED_MODE, data, 3);
+	if (ret < 0)
+		pr_err("%s failed on set sharekey mode:0x%2.2X\n", __func__, data[0]);
 }
 
 static void microp_led_mobeam_brightness_set(struct led_classdev *led_cdev,
@@ -315,7 +349,7 @@ static ssize_t microp_led_off_timer_show(struct device *dev,
 {
 	struct led_classdev *led_cdev;
 	struct microp_led_data *ldata;
-	uint8_t data[2];
+	uint8_t data[2]={0};
 	int ret, offtime;
 
 	led_cdev = (struct led_classdev *)dev_get_drvdata(dev);
@@ -591,6 +625,9 @@ static int microp_led_probe(struct platform_device *pdev)
 		else if (pdata->led_config[i].type == LED_MOBEAM)
 			ldata[i].ldev.brightness_set
 				= microp_led_mobeam_brightness_set;
+		else if (pdata->led_config[i].type == LED_SKEY)
+			ldata[i].ldev.brightness_set
+				= microp_led_sharekey_brightness_set;
 
 		mutex_init(&ldata[i].led_data_mutex);
 		spin_lock_init(&ldata[i].brightness_lock);

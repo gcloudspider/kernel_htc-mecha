@@ -16,6 +16,7 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/sched.h>
+#include <linux/slab.h>
 #include <linux/interrupt.h>
 #include <linux/ptrace.h>
 #include <linux/timer.h>
@@ -369,8 +370,7 @@ void msm_irq_enter_sleep1(bool arm9_wake, int from_idle)
 {
 	if (!arm9_wake || !smsm_int_info)
 		return;
-	smsm_int_info->interrupt_mask = msm_irq_smsm_wake_enable[!from_idle] &
-		~msm_irq_smsm_wake_enable_mask;
+	smsm_int_info->interrupt_mask = msm_irq_smsm_wake_enable[!from_idle] & ~msm_irq_smsm_wake_enable_mask;
 	smsm_int_info->pending_interrupts = 0;
 }
 
@@ -682,21 +682,21 @@ void msm_fiq_exit_sleep(void)
 
 void register_msm_irq_mask(unsigned int irq)
 {
-	uint32_t mask = 1UL << (irq & 31);
-	int smsm_irq = msm_irq_to_smsm[irq];
+        uint32_t mask = 1UL << (irq & 31);
+        int smsm_irq = msm_irq_to_smsm[irq];
 
-	mask = 1UL << (smsm_irq - 1);
-	msm_irq_smsm_wake_enable_mask |= mask;
+        mask = 1UL << (smsm_irq - 1);
+        msm_irq_smsm_wake_enable_mask |= mask;
 }
 EXPORT_SYMBOL(register_msm_irq_mask);
 
 void unregister_msm_irq_mask(unsigned int irq)
 {
-	uint32_t mask = 1UL << (irq & 31);
-	int smsm_irq = msm_irq_to_smsm[irq];
+        uint32_t mask = 1UL << (irq & 31);
+        int smsm_irq = msm_irq_to_smsm[irq];
 
-	mask = 1UL << (smsm_irq - 1);
-	msm_irq_smsm_wake_enable_mask &= ~mask;
+        mask = 1UL << (smsm_irq - 1);
+        msm_irq_smsm_wake_enable_mask &= ~mask;
 }
 EXPORT_SYMBOL(unregister_msm_irq_mask);
 

@@ -10,6 +10,7 @@
  */
 
 #include <linux/kernel.h>
+#include <linux/slab.h>
 #include <linux/sysdev.h>
 #include <linux/cpu.h>
 #include <linux/sysfs.h>
@@ -168,8 +169,10 @@ static void cpufreq_stats_free_table(unsigned int cpu)
 {
 	struct cpufreq_stats *stat = per_cpu(cpufreq_stats_table, cpu);
 	struct cpufreq_policy *policy = cpufreq_cpu_get(cpu);
+
 	if (policy && policy->cpu == cpu)
 		sysfs_remove_group(&policy->kobj, &stats_attr_group);
+
 	if (stat) {
 		kfree(stat->time_in_state);
 		kfree(stat);
@@ -264,9 +267,11 @@ static int cpufreq_stat_notifier_policy(struct notifier_block *nb,
 	table = cpufreq_frequency_get_table(cpu);
 	if (!table)
 		return 0;
+
 	ret = cpufreq_stats_create_table(policy, table);
 	if (ret)
 		return ret;
+
 	return 0;
 }
 
@@ -315,6 +320,8 @@ static int __cpuinit cpufreq_stat_cpu_callback(struct notifier_block *nfb,
 	case CPU_ONLINE_FROZEN:
 		cpufreq_update_policy(cpu);
 		break;
+	case CPU_DOWN_PREPARE:
+	case CPU_DOWN_PREPARE_FROZEN:
 	case CPU_DEAD:
 	case CPU_DEAD_FROZEN:
 		cpufreq_stats_free_table(cpu);

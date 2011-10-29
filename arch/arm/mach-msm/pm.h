@@ -17,6 +17,8 @@
 #ifndef __ARCH_ARM_MACH_MSM_PM_H
 #define __ARCH_ARM_MACH_MSM_PM_H
 
+#include <linux/types.h>
+#include <linux/cpuidle.h>
 #include <mach/msm_iomap.h>
 
 #define A11S_CLK_SLEEP_EN_ADDR MSM_CSR_BASE + 0x11c
@@ -29,7 +31,31 @@
 #define CLK_SLEEP_EN_DEBUG_TIME	0x20
 #define CLK_SLEEP_EN_GP_TIMER	0x40
 
-enum {
+/* This constant is used in bootloader to decide actions. */
+#define RESTART_REASON_BOOT_BASE	0x77665500
+#define RESTART_REASON_BOOTLOADER	(RESTART_REASON_BOOT_BASE | 0x00)
+#define RESTART_REASON_REBOOT		(RESTART_REASON_BOOT_BASE | 0x01)
+#define RESTART_REASON_RECOVERY		(RESTART_REASON_BOOT_BASE | 0x02)
+#define RESTART_REASON_RAMDUMP		(RESTART_REASON_BOOT_BASE | 0xAA)
+#define RESTART_REASON_POWEROFF		(RESTART_REASON_BOOT_BASE | 0xBB)
+#define RESTART_REASON_ERASE_FLASH	(RESTART_REASON_BOOT_BASE | 0xEF)
+
+/*
+   This restart constant is used for oem commands.
+   The actual value is parsed from reboot commands.
+   RIL FATAL will use oem-99 to restart a device.
+*/
+#define RESTART_REASON_OEM_BASE		0x6f656d00
+#define RESTART_REASON_RIL_FATAL	(RESTART_REASON_OEM_BASE | 0x99)
+
+#ifdef CONFIG_HOTPLUG_CPU
+extern int pen_release;
+extern void msm_secondary_startup(void);
+#else
+#define msm_secondary_startup NULL
+#endif
+
+enum msm_pm_sleep_mode {
 	MSM_PM_SLEEP_MODE_POWER_COLLAPSE_SUSPEND,
 	MSM_PM_SLEEP_MODE_POWER_COLLAPSE,
 	MSM_PM_SLEEP_MODE_APPS_SLEEP,
@@ -39,6 +65,8 @@ enum {
 	//MSM_PM_SLEEP_MODE_POWER_COLLAPSE_NO_XO_SHUTDOWN,
 	MSM_PM_SLEEP_MODE_NR
 };
+
+#define MSM_PM_MODE(cpu, mode_nr)  ((cpu) * MSM_PM_SLEEP_MODE_NR + (mode_nr))
 
 struct msm_pm_platform_data {
 	u8 supported;
@@ -50,6 +78,21 @@ struct msm_pm_platform_data {
 				staying in the low power mode saves power */
 };
 
+#ifdef CONFIG_ARCH_MSM8X60
+void msm_pm_set_platform_data(struct msm_pm_platform_data *data, int count);
+int msm_pm_idle_prepare(struct cpuidle_device *dev);
+int msm_pm_idle_enter(enum msm_pm_sleep_mode sleep_mode);
+extern int msm_watchdog_suspend(void);
+extern int msm_watchdog_resume(void);
+#else
 extern void msm_pm_set_platform_data(struct msm_pm_platform_data *data);
-
 #endif
+
+#ifdef CONFIG_HOTPLUG_CPU
+int msm_pm_platform_secondary_init(unsigned int cpu);
+#endif
+
+int print_gpio_buffer(struct seq_file *m);
+int free_gpio_buffer(void);
+
+#endif  /* __ARCH_ARM_MACH_MSM_PM_H */

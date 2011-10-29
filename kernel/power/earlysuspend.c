@@ -26,8 +26,13 @@
 enum {
 	DEBUG_USER_STATE = 1U << 0,
 	DEBUG_SUSPEND = 1U << 2,
+	DEBUG_NO_SUSPEND = 1U << 3,
 };
+#ifdef CONFIG_NO_SUSPEND
+static int debug_mask = DEBUG_USER_STATE | DEBUG_NO_SUSPEND;
+#else
 static int debug_mask = DEBUG_USER_STATE;
+#endif
 module_param_named(debug_mask, debug_mask, int, S_IRUGO | S_IWUSR | S_IWGRP);
 
 static DEFINE_MUTEX(early_suspend_lock);
@@ -124,11 +129,13 @@ static void early_suspend(struct work_struct *work)
 
 	pr_info("[R] early_suspend: sync\n");
 
-#ifdef CONFIG_SYS_SYNC_BLOCKING_DEBUG
-	sys_sync_debug();
-#else
-	sys_sync();
-#endif
+	suspend_sys_sync_queue();
+
+	if (debug_mask & DEBUG_NO_SUSPEND) {
+		pr_info("DEBUG_NO_SUSPEND set, will not suspend\n");
+		wake_lock(&no_suspend_wake_lock);
+	}
+
 abort:
 	spin_lock_irqsave(&state_lock, irqflags);
 	if (state == SUSPEND_REQUESTED_AND_SUSPENDED)
@@ -168,6 +175,9 @@ static void late_resume(struct work_struct *work)
 			pos->resume(pos);
 	if (debug_mask & DEBUG_SUSPEND)
 		pr_info("late_resume: done\n");
+
+	wake_unlock(&no_suspend_wake_lock);
+
 abort:
 	mutex_unlock(&early_suspend_lock);
 	pr_info("[R] late_resume end\n");

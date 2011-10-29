@@ -29,12 +29,17 @@
 #ifndef MDP4_H
 #define MDP4_H
 
-
+/*
+#define DEBUG_OVERLAY
+*/
 
 #define MDP4_NONBLOCKING	/* enable non blocking ioctl */
 
 #define MDP4_OVERLAYPROC0_BASE	0x10000
 #define MDP4_OVERLAYPROC1_BASE	0x18000
+
+#define MDP_OVERLAY0_TERM 0x20
+#define MDP_OVERLAY1_TERM 0x40
 
 #define MDP4_VIDEO_BASE 0x20000
 #define MDP4_VIDEO_OFF 0x10000
@@ -69,6 +74,7 @@ enum {
 	EBI2_LCD0,
 	EBI2_LCD1
 };
+
 enum {
 	OVERLAY_MODE_NONE,
 	OVERLAY_MODE_BLT
@@ -99,6 +105,7 @@ enum {
 #define INTR_EXTERNAL_VSYNC		BIT(9)
 #define INTR_EXTERNAL_INTF_UDERRUN	BIT(10)
 #define INTR_DMA_P_HISTOGRAM		BIT(17)
+#define INTR_MDP_HIST_DONE       	BIT(20) //DMA_P histogram interrupt
 
 /* histogram interrupts */
 #define INTR_HIST_DONE			BIT(1)
@@ -107,7 +114,8 @@ enum {
 
 #ifdef CONFIG_FB_MSM_OVERLAY
 #define MDP4_ANY_INTR_MASK     (INTR_OVERLAY0_DONE| \
-						INTR_DMA_P_HISTOGRAM)
+				INTR_PRIMARY_INTF_UDERRUN | \
+				INTR_DMA_P_HISTOGRAM)
 #else
 #define MDP4_ANY_INTR_MASK	(INTR_DMA_P_DONE| \
 				INTR_DMA_P_HISTOGRAM)
@@ -338,6 +346,8 @@ struct mdp4_overlay_pipe *mdp4_overlay_pipe_alloc(int ptype, bool usevg);
 void mdp4_overlay_pipe_free(struct mdp4_overlay_pipe *pipe);
 void mdp4_overlay_dmap_cfg(struct mdp4_overlay_pipe *pipe, int lcdc);
 void mdp4_overlay_dmap_xy(struct mdp4_overlay_pipe *pipe);
+void mdp4_overlay_dmae_cfg(struct mdp4_overlay_pipe *pipe, int lcdc);
+void mdp4_overlay_dmae_xy(struct mdp4_overlay_pipe *pipe);
 void mdp4_overlay_dmas_cfg(struct mdp4_overlay_pipe *pipe, int lcdc);
 void mdp4_overlay_dmas_xy(struct mdp4_overlay_pipe *pipe);
 int mdp4_overlay_active(struct mdp_info *mdp, int mixer);
@@ -353,6 +363,8 @@ void mdp4_vg_igc_lut_setup(struct mdp_info *mdp, int num);
 void mdp4_mixer_gc_lut_setup(struct mdp_info *mdp, int mixer_num);
 void mdp4_fetch_cfg(struct mdp_info *mdp, uint32_t clk, uint32_t pclk);
 uint32_t mdp4_rgb_igc_lut_cvt(uint32_t ndx);
+void mdp_pipe_kickoff(struct mdp_info *mdp, uint32_t term);
+
 #ifdef CONFIG_FB_MSM_WRITE_BACK
 void mdp4_dma_p_done_mddi(void);
 int mdp4_overlay_blt(struct mdp_device *mdp_dev,struct fb_info *info, struct msmfb_overlay_blt *req,

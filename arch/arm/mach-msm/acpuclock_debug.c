@@ -20,6 +20,7 @@
 #if defined(CONFIG_DEBUG_FS)
 
 enum {
+	ATTR_ACPU_FREQ_TBL,
 	ATTR_CURRENT_VDD,
 	ATTR_WFI_RAMP_DOWN,
 	ATTR_PWRC_RAMP_DOWN,
@@ -30,6 +31,20 @@ static char debug_buffer[DEBUG_BUFMAX];
 static unsigned int last_freq;
 static unsigned int last_vdd;
 static struct acpuclock_debug_dev *acpu_debug_dev;
+
+#if defined(CONFIG_ARCH_MSM7X30)
+struct clkctl_acpu_speed {
+	unsigned int	acpu_clk_khz;
+	int		src;
+	unsigned int	acpu_src_sel;
+	unsigned int	acpu_src_div;
+	unsigned int	axi_clk_hz;
+	unsigned int	vdd_mv;
+	unsigned int	vdd_raw;
+	unsigned long	lpj;
+};
+static struct clkctl_acpu_speed *acpu_freq_tbl, *tgt_s;
+#endif
 
 static ssize_t debug_get_voltage(struct file *file, char __user *buf,
 			  size_t count, loff_t *ppos)
@@ -93,6 +108,7 @@ static ssize_t debug_read(struct file *file, char __user *buf,
 {
 	int attr = (int)file->private_data;
 	size_t bsize = 0;
+	int offset = 0;
 
 	switch (attr) {
 	case ATTR_CURRENT_VDD:
@@ -113,6 +129,26 @@ static ssize_t debug_read(struct file *file, char __user *buf,
 		bsize = sprintf(debug_buffer,
 			"%d\n", acpu_debug_dev->get_pwrc_ramp_down());
 		break;
+	case ATTR_ACPU_FREQ_TBL:
+		if (!acpu_debug_dev->get_freq_tbl)
+			return -EINVAL;
+#if defined(CONFIG_ARCH_MSM7X30)
+		acpu_freq_tbl = acpu_debug_dev->get_freq_tbl();
+		for (tgt_s = acpu_freq_tbl; tgt_s->acpu_clk_khz != 0; tgt_s++) {
+			bsize += sprintf(debug_buffer + offset,
+				"%u %d %u %u %u %u %u %lu\n",
+				tgt_s->acpu_clk_khz,
+				tgt_s->src,
+				tgt_s->acpu_src_sel,
+				tgt_s->acpu_src_div,
+				tgt_s->axi_clk_hz,
+				tgt_s->vdd_mv,
+				tgt_s->vdd_raw,
+				tgt_s->lpj);
+			offset = strlen(debug_buffer);
+		}
+		break;
+#endif
 	default:
 		return -EINVAL;
 	}
@@ -155,6 +191,8 @@ static int __init acpuclock_debugfs_init(void)
 		(void *)ATTR_WFI_RAMP_DOWN, &debug_ops);
 	debugfs_create_file("pwrc_ramp_down", 0600, dent,
 		(void *)ATTR_PWRC_RAMP_DOWN, &debug_ops);
+	debugfs_create_file("acpu_freq_tbl", 0600, dent,
+		(void *)ATTR_ACPU_FREQ_TBL, &debug_ops);
 	return 0;
 }
 

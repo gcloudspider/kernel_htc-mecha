@@ -18,6 +18,7 @@
 #define	__LINUX_USB_ANDROID_H
 
 #include <linux/usb/composite.h>
+#include <linux/if_ether.h>
 
 struct android_usb_function {
 	struct list_head	list;
@@ -26,6 +27,11 @@ struct android_usb_function {
 };
 
 struct android_usb_product {
+	/* Vendor ID for this set of functions.
+	 * Default vendor_id in platform data will be used if this is zero.
+	 */
+	__u16 vendor_id;
+
 	/* Default product ID. */
 	__u16 product_id;
 
@@ -83,16 +89,20 @@ struct usb_mass_storage_platform_data {
 	 * NOTE: Only support one cdrom disk
 	 * and it must be located in last lun */
 	int cdrom_lun;
+	int cdrom_cttype;
 };
 
-extern void android_usb_set_connected(int on);
+/* Platform data for USB ethernet driver. */
+struct usb_ether_platform_data {
+	u8	ethaddr[ETH_ALEN];
+	u32	vendorID;
+	const char *vendorDescr;
+};
 
 extern void android_register_function(struct android_usb_function *f);
-
-extern void android_enable_function(struct usb_function *f, int enable);
-
 extern int android_get_model_id(void);
+extern void android_enable_function(struct usb_function *f, int enable);
 extern int android_switch_function(unsigned func);
-
+extern unsigned android_switch_sum(void);
 
 #endif	/* __LINUX_USB_ANDROID_H */

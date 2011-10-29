@@ -60,7 +60,7 @@ unsigned int g_unblank_stage = 0;
 #define SONYWVGA_BR_DEF_USER_PWM         143
 #define SONYWVGA_BR_MIN_USER_PWM         30
 #define SONYWVGA_BR_MAX_USER_PWM         255
-#define SONYWVGA_BR_DEF_PANEL_PWM        153
+#define SONYWVGA_BR_DEF_PANEL_PWM        128
 #define SONYWVGA_BR_MIN_PANEL_PWM        8
 #define SONYWVGA_BR_MAX_PANEL_PWM        255
 #define SONYWVGA_BR_DEF_PANEL_UP_PWM    132
@@ -75,7 +75,7 @@ static struct wake_lock panel_idle_lock;
 
 inline int is_sony_spi(void)
 {
-	if( panel_type == PANEL_ID_SAGA_SONY )
+	if( panel_type == PANEL_ID_SAG_SONY )
 		return ( (panel_type & BL_MASK) == BL_SPI ? 1 : 0 );
 	else
 		return ( panel_type & SONY_PWM_SPI ? 1 : 0 );
@@ -83,7 +83,7 @@ inline int is_sony_spi(void)
 
 inline int is_sony_with_gamma(void)
 {
-	if(panel_type == PANEL_ID_SAGA_SONY)
+	if(panel_type == PANEL_ID_SAG_SONY)
 		return 1;
 	else
 		return (panel_type & SONY_GAMMA ? 1 : 0);
@@ -91,7 +91,7 @@ inline int is_sony_with_gamma(void)
 
 inline int is_sony_RGB666(void)
 {
-	if(panel_type == PANEL_ID_SAGA_SONY)
+	if(panel_type == PANEL_ID_SAG_SONY)
 		return ((panel_type & DEPTH_MASK) == DEPTH_RGB666 ? 1 : 0);
 	else
 		return (panel_type & SONY_RGB666 ? 1 : 0);
@@ -231,6 +231,15 @@ static struct spi_msg SONY_GAMMA_UPDATE_TABLE[] = {
 	LCM_CMD(0xD0, 0x5A, 0x5A),
 	LCM_CMD(0xC2, 0x53, 0x12),
 };
+static struct spi_msg SAG_SONY_GAMMA_UPDATE_TABLE[] = {
+	LCM_CMD(0x53, 0x24),
+	LCM_CMD(0xF0, 0x5A, 0x5A),
+	LCM_CMD(0xF1, 0x5A, 0x5A),
+	LCM_CMD(0xD0, 0x5A, 0x5A),
+	LCM_CMD(0xC2, 0x36, 0x12),//Change PWM to 13k for HW's request
+};
+
+
 
 static int lcm_write_tb(struct spi_msg cmd_table[], unsigned size)
 {
@@ -287,7 +296,10 @@ static void sonywvga_set_gamma_val(int val)
 	} else {
 		shrink_pwm = sonywvga_panel_shrink_pwm(val);
 	        qspi_send_9bit(&gamma_update);
-		lcm_write_tb(SONY_GAMMA_UPDATE_TABLE,  ARRAY_SIZE(SONY_GAMMA_UPDATE_TABLE));
+		if( panel_type == PANEL_ID_SAG_SONY )
+			lcm_write_tb(SAG_SONY_GAMMA_UPDATE_TABLE,  ARRAY_SIZE(SAG_SONY_GAMMA_UPDATE_TABLE));
+		else
+			lcm_write_tb(SONY_GAMMA_UPDATE_TABLE,  ARRAY_SIZE(SONY_GAMMA_UPDATE_TABLE));
 	}
 	last_val_pwm = val;
 }
@@ -485,7 +497,7 @@ static int __init sonywvga_init_panel(void)
 	return 0;
 }
 
-static int __init sonywvga_probe(struct platform_device *pdev)
+static int sonywvga_probe(struct platform_device *pdev)
 {
 	int rc = -EIO;
 	struct panel_platform_data *pdata;

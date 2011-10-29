@@ -21,6 +21,7 @@
 #include <linux/interrupt.h>
 #include <linux/wakelock.h>
 #include <linux/platform_device.h>
+#include <linux/slab.h>
 #include <asm/mach-types.h>
 
 #define DRIVER_NAME "dummy_keypad"

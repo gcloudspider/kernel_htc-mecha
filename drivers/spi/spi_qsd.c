@@ -1,11 +1,10 @@
 /* linux/driver/spi/spi_qsd.c 
- * 
+ *
  * Copyright (C) 2009 Solomon Chiu <solomon_chiu@htc.com>
  *
  * 	This is a temporary solution to substitute Qualcomm's SPI.
  *	Should be replaced by formal SPI driver in the future.
  */
-
 #include <linux/version.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -61,8 +60,8 @@ int qspi_send_9bit(struct spi_msg *msg)
 			tmp = (0x1<<8 | *(msg->data+i))<<23;
 			msg->buffer[j] = tmp >> 24;
 			msg->buffer[j+1] = (tmp & 0x00FF0000) >> 16;
-		}
-	}
+}
+}
 
 	spi_read_write_lock(spidev, msg, NULL, 2, 1);
 
@@ -83,7 +82,7 @@ int qspi_send(unsigned char id, unsigned data)
 
 	spi_write(spidev,buffer,2);
 	return 0;
-}
+	}
 
 
 static int msm_spi_probe(struct spi_device *spi)
@@ -97,7 +96,7 @@ static int msm_spi_remove(struct spi_device *pdev)
 {
 	spidev = NULL;
 	return 0;
-}
+	}
 
 
 static struct spi_driver spi_qsd = {
@@ -136,13 +135,13 @@ int qspi_send_16bit(unsigned char id, unsigned data)
         /* bit-5: OUTPUT_FIFO_NOT_EMPTY */
 	clk_enable(spi_clk);
         while( readl(spi_base+SPI_OPERATIONAL) & (1<<5) )
-        {
+{
                 if( (err=readl(spi_base+SPI_ERROR_FLAGS)) )
-                {
+	{
                         printk("\rERROR:  SPI_ERROR_FLAGS=%d\r", err);
                         return -1;
-                }
-        }
+		}
+	}
 
 	writel( (id<<13 | data)<<16, spi_base+SPI_OUTPUT_FIFO );/*AUO*/
         udelay(1000);
@@ -158,13 +157,13 @@ int qspi_send_9bit(unsigned char id, unsigned data)
         /* bit-5: OUTPUT_FIFO_NOT_EMPTY */
 	clk_enable(spi_clk);
         while( readl(spi_base+SPI_OPERATIONAL) & (1<<5) )
-        {
+{
                 if( (err=readl(spi_base+SPI_ERROR_FLAGS)) )
-                {
+{
                         printk("\rERROR:  SPI_ERROR_FLAGS=%d\r", err);
                         return -1;
-                }
-        }
+	}
+}
 
 	writel( ((id<<8) | data)<<23, spi_base+SPI_OUTPUT_FIFO);/*sharp*/
 
@@ -181,13 +180,13 @@ int qspi_send(unsigned char id, unsigned data)
         /* bit-5: OUTPUT_FIFO_NOT_EMPTY */
 	clk_enable(spi_clk);
         while( readl(spi_base+SPI_OPERATIONAL) & (1<<5) )
-        {
+{
                 if( (err=readl(spi_base+SPI_ERROR_FLAGS)) )
-                {
+{
                         printk("\rERROR:  SPI_ERROR_FLAGS=%d\r", err);
                         return -1;
-                }
-        }
+	}
+}
 
         writel( (0x7000 | id<<9 | data)<<16, spi_base+SPI_OUTPUT_FIFO );
         udelay(100);
@@ -195,7 +194,7 @@ int qspi_send(unsigned char id, unsigned data)
 	return 0;
 }
 
-static int __init msm_spi_probe(struct platform_device *pdev)
+static int msm_spi_probe(struct platform_device *pdev)
 {
 	int rc ;
 	struct spi_platform_data *pdata = pdev->dev.platform_data;
@@ -206,16 +205,16 @@ static int __init msm_spi_probe(struct platform_device *pdev)
 
         spi_clk = clk_get(&pdev->dev, "spi_clk");
         if (IS_ERR(spi_clk)) {
-                dev_err(&pdev->dev, "%s: unable to get spi_clk\n", __func__);
+		dev_err(&pdev->dev, "%s: unable to get spi_clk\n", __func__);
                 rc = PTR_ERR(spi_clk);
-                goto err_probe_clk_get;
-        }
+		goto err_probe_clk_get;
+	}
         rc = clk_enable(spi_clk);
-        if (rc) {
-                dev_err(&pdev->dev, "%s: unable to enable spi_clk\n",
-                        __func__);
-                goto err_probe_clk_enable;
-        }
+	if (rc) {
+		dev_err(&pdev->dev, "%s: unable to enable spi_clk\n",
+			__func__);
+		goto err_probe_clk_enable;
+	}
 
 	if(pdata == NULL)
 		clk_set_rate(spi_clk, 4800000);
@@ -231,7 +230,7 @@ static int __init msm_spi_probe(struct platform_device *pdev)
 	printk("-%s()\n", __FUNCTION__);
 	clk_disable(spi_clk);
 
-	return 0 ;
+	return 0;
 
 err_probe_clk_get:
 err_probe_clk_enable:

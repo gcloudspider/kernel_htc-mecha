@@ -496,8 +496,8 @@ u32 ddl_handle_core_errors(struct ddl_context *ddl_context)
 		return false;
 	}
 
-	ERR("\n %s(): OPFAILED!!", __func__);
-	ERR("\n CMD_ERROR_STATUS = %u, DISP_ERR_STATUS = %u",
+	ERR("%s(): OPFAILED!!", __func__);
+	ERR("CMD_ERROR_STATUS = %u, DISP_ERR_STATUS = %u",
 		ddl_context->cmd_err_status,
 		ddl_context->disp_pic_err_status);
 

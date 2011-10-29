@@ -155,6 +155,7 @@
 #define VEN_RC_VBR_VFR	2
 #define VEN_RC_VBR_CFR	3
 #define VEN_RC_CBR_VFR	4
+#define VEN_RC_CBR_CFR	5
 
 /*Different modes for flushing buffers*/
 #define VEN_FLUSH_INPUT	1
@@ -274,6 +275,14 @@ struct venc_ioctl_msg{
 /* Asynchronous respone message code:VEN_MSG_STOP*/
 #define VEN_IOCTL_CMD_STOP _IO(VEN_IOCTLBASE_NENC, 19)
 
+#define VEN_IOCTL_SET_RECON_BUFFER \
+	_IOW(VEN_IOCTLBASE_NENC, 20, struct venc_ioctl_msg)
+
+#define VEN_IOCTL_FREE_RECON_BUFFER \
+	_IOW(VEN_IOCTLBASE_NENC, 21, struct venc_ioctl_msg)
+
+#define VEN_IOCTL_GET_RECON_BUFFER_SIZE \
+	_IOW(VEN_IOCTLBASE_NENC, 22, struct venc_ioctl_msg)
 
 /*ENCODER PROPERTY CONFIGURATION & CAPABILITY IOCTLs*/
 
@@ -451,6 +460,9 @@ struct venc_ioctl_msg{
 #define VEN_IOCTL_GET_QP_RANGE \
 	_IOR(VEN_IOCTLBASE_ENC, 45, struct venc_ioctl_msg)
 
+#define VEN_IOCTL_GET_NUMBER_INSTANCES \
+	_IOR(VEN_IOCTLBASE_ENC, 46, struct venc_ioctl_msg)
+
 struct venc_switch{
 	unsigned char	status;
 };
@@ -591,4 +603,18 @@ struct venc_msg{
 	struct venc_buffer	buf;
 	unsigned long	msgdata_size;
 };
+
+struct venc_recon_addr{
+	unsigned long buffer_size;
+	unsigned long pmem_fd;
+	unsigned long offset;
+};
+
+struct venc_recon_buff_size{
+	int width;
+	int height;
+	int size;
+	int alignment;
+};
+
 #endif /* _MSM_VIDC_ENC_H_ */

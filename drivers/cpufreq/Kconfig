@@ -61,13 +61,6 @@ choice
 	  This option sets which CPUFreq governor shall be loaded at
 	  startup. If in doubt, select 'performance'.
 
-config CPU_FREQ_DEFAULT_GOV_SMARTASS
-	bool "smartass"
-	select CPU_FREQ_GOV_SMARTASS
-	select CPU_FREQ_GOV_PERFORMANCE
-	help
-	  Use the CPUFreq governor 'smartass' as default.
-
 config CPU_FREQ_DEFAULT_GOV_PERFORMANCE
 	bool "performance"
 	select CPU_FREQ_GOV_PERFORMANCE
@@ -140,14 +133,6 @@ config CPU_FREQ_GOV_PERFORMANCE
 
 	  If in doubt, say Y.
 
-config CPU_FREQ_GOV_SMARTASS
-	tristate "'smartass' cpufreq governor"
-	depends on CPU_FREQ
-	help
-	  smartass' - a "smart" optimized governor for the hero!
-
-	  If in doubt, say N.
-
 config CPU_FREQ_GOV_POWERSAVE
 	tristate "'powersave' governor"
 	help
@@ -195,8 +180,8 @@ config CPU_FREQ_GOV_ONDEMAND
 config CPU_FREQ_GOV_INTERACTIVE
 	tristate "'interactive' cpufreq policy governor"
 	help
-	'interactive' - This driver adds a dynamic cpufreq policy governor
-	designed for latency-sensitive workloads.
+	  'interactive' - This driver adds a dynamic cpufreq policy governor
+	  designed for latency-sensitive workloads.
 
 config CPU_FREQ_GOV_CONSERVATIVE
 	tristate "'conservative' cpufreq governor"
@@ -221,13 +206,4 @@ config CPU_FREQ_GOV_CONSERVATIVE
 
 	  If in doubt, say N.
 
-config CPU_FREQ_VDD_LEVELS
-	bool "CPU Vdd levels sysfs interface"
-	depends on CPU_FREQ_STAT
-	depends on ARCH_MSM7X30
-	default n
-	help
-	  CPU Vdd levels sysfs interface
-
 endif	# CPU_FREQ
-

@@ -301,6 +301,8 @@ static CODEC_SPI_CMD CODEC_SET_VOLUME_R[] = {
 
 static CODEC_SPI_CMD CODEC_MICBIAS_ON[] = {
 	{'w', 0x00, 0x01},
+	{'w', 0x01, 0x08},
+	{'w', 0x02, 0x21},
 	{'w', 0x33, 0x68}
 };
 

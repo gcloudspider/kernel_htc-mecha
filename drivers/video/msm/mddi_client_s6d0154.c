@@ -26,11 +26,13 @@
 #include <linux/kthread.h>
 #include <linux/wakelock.h>
 #include <linux/clk.h>
+#include <linux/slab.h>
 #include <asm/atomic.h>
 #include <asm/mach-types.h>
 #include "../../../arch/arm/mach-msm/proc_comm.h"
 #include <mach/msm_fb.h>
 #include <mach/msm_iomap.h>
+#include <mach/debug_display.h>
 #define printk(arg,...)
 #if 0
 #define B(s...) printk(s)
@@ -91,7 +93,7 @@ samsung_update_framedata(struct panel_info *panel)
 
 static void samsung_dump_vsync(void)
 {
-	printk(KERN_INFO "STATUS %d %s EBI1 %lu\n",
+	PR_DISP_INFO("STATUS %d %s EBI1 %lu\n",
 			readl(VSYNC_STATUS) & 0x04,
 			readl(VSYNC_EN) & 0x04 ? "ENABLED" : "DISABLED",
 			clk_get_rate(ebi1_clk));
@@ -111,7 +113,7 @@ static inline void samsung_clear_vsync(void)
 	}
 
 	if (retry == 0)
-		printk(KERN_ERR "%s: clear vsync failed!\n", __func__);
+		PR_DISP_ERR("%s: clear vsync failed!\n", __func__);
 }
 
 static void
@@ -269,7 +271,7 @@ static int setup_vsync(struct panel_info *panel, int init)
 		goto err_request_irq_failed;
 	disable_irq(irq);
 
-	printk(KERN_INFO "vsync on gpio %d now %d\n", gpio,
+	PR_DISP_INFO("vsync on gpio %d now %d\n", gpio,
 			gpio_get_value(gpio));
 	return 0;
 

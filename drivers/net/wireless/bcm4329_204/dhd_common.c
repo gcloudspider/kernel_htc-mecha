@@ -1066,11 +1066,10 @@ wl_iw_parse_ssid_list_tlv(char** list_str, wlc_ssid_t* ssid, int max, int *bytes
 			memset((char*)ssid[idx].SSID, 0x0, DOT11_MAX_SSID_LEN);
 			*bytes_left -= 1;
 			str += 1;
-			DHD_TRACE(("BROADCAST SCAN  left=%d\n", *bytes_left));
-			printk (KERN_INFO"[WLAN] BROADCAST SCAN\n");
+			DHD_DEFAULT(("BROADCAST SCAN  left=%d\n", *bytes_left));
 		}
 		else if (str[0] <= DOT11_MAX_SSID_LEN) {
-			printk (KERN_INFO"[WLAN] Specific SSID scan\n");
+			DHD_DEFAULT(("Specific SSID scan\n"));
 			/* Get proper SSID size */
 			ssid[idx].SSID_len = str[0];
 			*bytes_left -= 1;
@@ -1139,8 +1138,12 @@ wl_iw_parse_ssid_list(char** list_str, wlc_ssid_t* ssid, int idx, int max)
 			ssid[idx].SSID_len = 0;
 
 		if (idx < max) {
-			strcpy((char*)ssid[idx].SSID, str);
-			ssid[idx].SSID_len = strlen(str);
+#ifdef HTC_KlocWork
+            strncpy((char*)ssid[idx].SSID, str, DOT11_MAX_SSID_LEN);
+#else
+            strcpy((char*)ssid[idx].SSID, str);
+#endif
+            ssid[idx].SSID_len = strlen(str);
 		}
 		idx++;
 	}
@@ -1166,9 +1169,9 @@ wl_iw_parse_channel_list(char** list_str, uint16* channel_list, int channel_num)
 	while (strncmp(str, GET_NPROBE, strlen(GET_NPROBE))) {
 		val = (int)strtoul(str, &endptr, 0);
 		if (endptr == str) {
-			printk(KERN_INFO"could not parse channel number starting at"
+			DHD_DEFAULT(("could not parse channel number starting at"
 				" substring \"%s\" in list:\n%s\n",
-				str, *list_str);
+				str, *list_str));
 			return -1;
 		}
 		str = endptr + strspn(endptr, " ,");

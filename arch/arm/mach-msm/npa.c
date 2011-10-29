@@ -66,6 +66,7 @@
 #include <linux/string.h>
 #include <linux/workqueue.h>
 #include <linux/spinlock_types.h>
+#include <linux/slab.h>
 
 #include "npa.h"
 #include "npa_resource.h"
@@ -345,6 +346,10 @@ static struct npa_resource *create_resource(struct npa_node_definition *node,
 				GFP_KERNEL);
 		new_defn = kzalloc(sizeof(struct npa_resource_definition),
 				GFP_KERNEL);
+		if (!new_node || !new_defn) {
+			printk(KERN_WARNING "Not enough memory to allocate new_node/new_defn.\n");
+			return NULL;
+		}
 		new_defn->name = name;
 		new_node->resources = new_defn;
 		new_node->resource_count = 1;
@@ -362,6 +367,11 @@ static struct npa_resource *create_resource(struct npa_node_definition *node,
 	if (!resource) {
 		new_resource = kzalloc(sizeof(struct npa_resource), GFP_ATOMIC);
 		new_alias = kzalloc(sizeof(struct npa_alias_list), GFP_ATOMIC);
+		if (!new_resource || !new_alias) {
+			write_unlock(&list_lock);
+			printk(KERN_WARNING "Not enough memory to allocate new_resource/new_alias.\n");
+			return NULL;
+		}
 		new_alias->alias = name;
 		new_alias->resource = new_resource;
 		INIT_LIST_HEAD(&new_alias->list);
@@ -428,6 +438,10 @@ static int register_resource_event(struct npa_resource *resource,
 		return 0; /* Nothing to wait for */
 
 	event = kzalloc(sizeof(struct npa_event), GFP_KERNEL);
+	if (!event) {
+		printk(KERN_ERR"(%s) alloc event failed\n", __func__);
+		return -ENOMEM;
+	}
 
 	INIT_LIST_HEAD(&event->list);
 	INIT_WORK(&event->work, send_single_event);
@@ -795,6 +809,10 @@ int npa_define_node(struct npa_node_definition *node,
 		"NPA: Defining node: [%s]\n", node->name);
 
 	common_lock = kzalloc(sizeof(struct mutex), GFP_KERNEL);
+	if (!common_lock) {
+		printk(KERN_ERR"(%s) alloc common_lock failed\n", __func__);
+		return -ENOMEM;
+	}
 	mutex_init(common_lock);
 
 	/* For each resource definition in this node definition, see if a
@@ -916,6 +934,11 @@ int npa_alias_resource(const char *resource_name, const char *alias_name,
 		}
 		list_del(&resource->list);
 	} else {
+		if (!ralias) {
+			write_unlock(&list_lock);
+			printk(KERN_ERR"(%s) alloc ralias failed\n", __func__);
+			return -ENOMEM;
+		}
 		INIT_LIST_HEAD(&ralias->list);
 		ralias->alias = alias_name;
 		ralias->resource = parent;
@@ -1025,6 +1048,9 @@ struct npa_client *npa_create_sync_client(const char *resource_name,
 		"resource [%s]\n", client_name, resource_name);
 
 	client = kzalloc(sizeof(struct npa_client), GFP_KERNEL);
+	if (!client) {
+		return ERR_PTR(-ENOMEM);;
+	}
 	INIT_LIST_HEAD(&client->list);
 	client->name = client_name;
 	client->resource_name = resource_name;
@@ -1222,6 +1248,10 @@ struct npa_event *npa_create_change_event(const char *resource_name,
 		return ERR_PTR(-ENODEV);
 
 	event = kzalloc(sizeof(struct npa_event), GFP_KERNEL);
+	if (!event) {
+		printk(KERN_ERR"(%s) alloc event failed\n", __func__);
+		return ERR_PTR(-ENOMEM);
+	}
 	INIT_LIST_HEAD(&event->list);
 	INIT_WORK(&event->work, send_single_event);
 	event->type = NPA_EVENT_CHANGE;
@@ -1260,6 +1290,10 @@ struct npa_event *npa_create_watermark_event(const char *resource_name,
 		return ERR_PTR(-ENODEV);
 
 	event = kzalloc(sizeof(struct npa_event), GFP_KERNEL);
+	if (!event) {
+		printk(KERN_ERR"(%s) alloc event failed\n", __func__);
+		return ERR_PTR(-ENOMEM);
+	}
 	INIT_LIST_HEAD(&event->list);
 	INIT_WORK(&event->work, send_single_event);
 	event->type = NPA_EVENT_LO_WATERMARK;

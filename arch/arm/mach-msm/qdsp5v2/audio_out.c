@@ -15,7 +15,7 @@
  * GNU General Public License for more details.
  *
  */
-#include <mach/debug_audio_mm.h>
+#include <linux/version.h>
 #include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/miscdevice.h>
@@ -39,6 +39,14 @@
 #include <mach/qdsp5v2/audio_dev_ctl.h>
 
 #include <mach/htc_pwrsink.h>
+#include <mach/debug_mm.h>
+#include <linux/rtc.h>
+
+#ifdef CONFIG_DEBUG_FS
+#include <linux/debugfs.h>
+#include <linux/uaccess.h>
+#include <linux/string.h>
+#endif
 
 #define BUFSZ (960 * 5)
 #define DMASZ (BUFSZ * 2)
@@ -92,6 +100,17 @@ struct audio {
 	struct audpp_cmd_cfg_object_params_volume vol_pan;
 };
 
+#ifdef CONFIG_DEBUG_FS
+	static struct file *f_write = NULL;
+	mm_segment_t orig_fs;
+	int length_write = 0;
+	static char *fwrite  = "/data/dump";
+
+	static struct dentry *debugfs_audio_out_dent;
+	static struct dentry *debugfs_enable;
+	static unsigned char aud_out_enable = 0;
+#endif
+
 static void audio_out_listener(u32 evt_id, union auddev_evt_data *evt_payload,
 				void *private_data)
 {
@@ -118,14 +137,23 @@ static void audio_out_listener(u32 evt_id, union auddev_evt_data *evt_payload,
 					POPP);
 		break;
 	default:
-		MM_ERR("ERROR:wrong event\n");
+		MM_AUD_ERR("ERROR:wrong event\n");
 		break;
        }
 }
 
 static void audio_prevent_sleep(struct audio *audio)
 {
-	pr_info("++++++++++++++++++++++++++++++\n");
+	struct timespec ts;
+	struct rtc_time tm;
+	getnstimeofday(&ts);
+	rtc_time_to_tm(ts.tv_sec, &tm);
+	pr_aud_info("++++++++++++++++++++++++++++++\n");
+	pr_aud_info1("[ATS][play_music][successful] at %lld \
+		(%d-%02d-%02d %02d:%02d:%02d.%09lu UTC)\n",
+		ktime_to_ns(ktime_get()),
+		tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+		tm.tm_hour, tm.tm_min, tm.tm_sec, ts.tv_nsec);
 	MM_DBG("\n"); /* Macro prints the file name and function */
 	wake_lock(&audio->wakelock);
 	wake_lock(&audio->idlelock);
@@ -133,10 +161,19 @@ static void audio_prevent_sleep(struct audio *audio)
 
 static void audio_allow_sleep(struct audio *audio)
 {
+	struct timespec ts;
+	struct rtc_time tm;
 	wake_unlock(&audio->wakelock);
 	wake_unlock(&audio->idlelock);
 	MM_DBG("\n"); /* Macro prints the file name and function */
-	pr_info("------------------------------\n");
+	getnstimeofday(&ts);
+	rtc_time_to_tm(ts.tv_sec, &tm);
+	pr_aud_info1("[ATS][stop_music][successful] at %lld \
+		(%d-%02d-%02d %02d:%02d:%02d.%09lu UTC)\n",
+		ktime_to_ns(ktime_get()),
+		tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+		tm.tm_hour, tm.tm_min, tm.tm_sec, ts.tv_nsec);
+	pr_aud_info("------------------------------\n");
 }
 
 static int audio_dsp_out_enable(struct audio *audio, int yes);
@@ -148,7 +185,7 @@ static void audio_dsp_event(void *private, unsigned id, uint16_t *msg);
 /* must be called with audio->lock held */
 static int audio_enable(struct audio *audio)
 {
-	pr_info("audio_enable\n");
+	pr_aud_info("audio_enable\n");
 
 	if (audio->enabled)
 		return 0;
@@ -166,7 +203,7 @@ static int audio_enable(struct audio *audio)
 	audio_prevent_sleep(audio);
 
 	if (audpp_enable(-1, audio_dsp_event, audio)) {
-		MM_ERR("audpp_enable() failed\n");
+		MM_AUD_ERR("audpp_enable() failed\n");
 		audio_allow_sleep(audio);
 		return -ENODEV;
 	}
@@ -179,7 +216,7 @@ static int audio_enable(struct audio *audio)
 /* must be called with audio->lock held */
 static int audio_disable(struct audio *audio)
 {
-	pr_info("audio_disable\n");
+	pr_aud_info("audio_disable\n");
 	if (audio->enabled) {
 		audio->enabled = 0;
 		audio_dsp_out_enable(audio, 0);
@@ -208,11 +245,11 @@ static void audio_dsp_event(void *private, unsigned id, uint16_t *msg)
 
 		MM_DBG("HOST_PCM id %d idx %d\n", id, idx);
 		if (id != AUDPP_MSG_HOSTPCM_ID_ARM_RX) {
-			MM_ERR("bogus id\n");
+			MM_AUD_ERR("bogus id\n");
 			break;
 		}
 		if (idx > 1) {
-			MM_ERR("bogus buffer idx\n");
+			MM_AUD_ERR("bogus buffer idx\n");
 			break;
 		}
 		spin_lock_irqsave(&audio->dsp_lock, flags);
@@ -240,15 +277,14 @@ static void audio_dsp_event(void *private, unsigned id, uint16_t *msg)
 		/* prints only if 1 second is elapsed since the last time
 		 * this message has been printed */
 		if (printk_timed_ratelimit(&pcmdmamsd_time, 1000))
-			printk(KERN_INFO "[%s:%s] PCMDMAMISSED %d\n",
-			__MM_FILE__, __func__, msg[0]);
+			MM_AUD_INFO("PCMDMAMISSED %d\n", msg[0]);
 		audio->teos++;
 		MM_DBG("PCMDMAMISSED Count per Buffer %d\n", audio->teos);
 		wake_up(&audio->wait);
 		break;
 	case AUDPP_MSG_CFG_MSG:
 		if (msg[0] == AUDPP_MSG_ENA_ENA) {
-			MM_INFO("CFG_MSG ENABLE\n");
+			MM_DBG("CFG_MSG ENABLE\n");
 			audio->out_needed = 0;
 			audio->running = 1;
 			audpp_dsp_set_vol_pan(audio->dec_id, &audio->vol_pan,
@@ -256,14 +292,14 @@ static void audio_dsp_event(void *private, unsigned id, uint16_t *msg)
 			audpp_route_stream(audio->dec_id, audio->source);
 			audio_dsp_out_enable(audio, 1);
 		} else if (msg[0] == AUDPP_MSG_ENA_DIS) {
-			MM_INFO("CFG_MSG DISABLE\n");
+			MM_DBG("CFG_MSG DISABLE\n");
 			audio->running = 0;
 		} else {
-			MM_ERR("CFG_MSG %d?\n", msg[0]);
+			MM_AUD_ERR("CFG_MSG %d?\n", msg[0]);
 		}
 		break;
 	default:
-		MM_ERR("UNKNOWN (%d)\n", id);
+		MM_AUD_ERR("UNKNOWN (%d)\n", id);
 	}
 }
 
@@ -437,8 +473,13 @@ static long audio_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 }
 
 /* Only useful in tunnel-mode */
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 34))
+static int audio_fsync(struct file *file, int datasync)
+#else
 static int audio_fsync(struct file *file, struct dentry *dentry,
 			int datasync)
+#endif
+
 {
 	struct audio *audio = file->private_data;
 	int rc = 0;
@@ -506,10 +547,18 @@ static ssize_t audio_write(struct file *file, const char __user *buf,
 			cap_raise(new->cap_effective, CAP_SYS_NICE);
 			commit_creds(new);
 			if ((sched_setscheduler(current, SCHED_RR, &s)) < 0)
-				MM_ERR("sched_setscheduler failed\n");
+				MM_AUD_ERR("sched_setscheduler failed\n");
 		}
 	}
 
+#ifdef CONFIG_DEBUG_FS
+	if (aud_out_enable) {
+		length_write = f_write->f_op->write(f_write, buf,
+						count, &f_write->f_pos);
+		if (length_write == 0)
+			MM_AUD_INFO("failed to write \n");
+	}
+#endif
 	mutex_lock(&audio->write_lock);
 	while (count > 0) {
 		frame = audio->out + audio->out_head;
@@ -555,7 +604,7 @@ static ssize_t audio_write(struct file *file, const char __user *buf,
 	if (!rt_policy(old_policy)) {
 		struct sched_param v = { .sched_priority = old_prio };
 		if ((sched_setscheduler(current, old_policy, &v)) < 0)
-			MM_ERR("sched_setscheduler failed\n");
+			MM_AUD_ERR("sched_setscheduler failed\n");
 		if (likely(!cap_nice)) {
 			struct cred *new = prepare_creds();
 			if (new != NULL) {
@@ -594,7 +643,7 @@ static int audio_open(struct inode *inode, struct file *file)
 	mutex_lock(&audio->lock);
 
 	if (audio->opened) {
-		MM_ERR("busy\n");
+		MM_AUD_ERR("busy\n");
 		rc = -EBUSY;
 		goto done;
 	}
@@ -603,7 +652,7 @@ static int audio_open(struct inode *inode, struct file *file)
 		audio->data = dma_alloc_coherent(NULL, DMASZ,
 						 &audio->phys, GFP_KERNEL);
 		if (!audio->data) {
-			MM_ERR("could not allocate DMA buffers\n");
+			MM_AUD_ERR("could not allocate DMA buffers\n");
 			rc = -ENOMEM;
 			goto done;
 		}
@@ -633,14 +682,14 @@ static int audio_open(struct inode *inode, struct file *file)
 				|AUDDEV_EVT_DEV_RLS|
 				AUDDEV_EVT_STREAM_VOL_CHG;
 
-	MM_INFO("register for event callback pdata %p\n", audio);
+	MM_DBG("register for event callback pdata %p\n", audio);
 	rc = auddev_register_evt_listner(audio->device_events,
 					AUDDEV_CLNT_DEC,
 					audio->dec_id,
 					audio_out_listener,
 					(void *)audio);
 	if (rc) {
-		MM_ERR("%s: failed to register listener\n", __func__);
+		MM_AUD_ERR("%s: failed to register listener\n", __func__);
 		dma_free_coherent(NULL, DMASZ, audio->data, audio->phys);
 		goto done;
 	}
@@ -648,6 +697,24 @@ static int audio_open(struct inode *inode, struct file *file)
 	file->private_data = audio;
 	audio->opened = 1;
 	rc = 0;
+#ifdef CONFIG_DEBUG_FS
+	if (!f_write) {
+		f_write = filp_open(fwrite, O_WRONLY | O_CREAT, 0600);
+
+		if (!f_write || !f_write->f_op || !f_write->f_op->read) {
+			MM_AUD_ERR("WARNING: File (read) object is null!!!\n");
+			return -EINVAL;
+		}
+		MM_AUD_INFO("sucess in opening write file\n");
+		f_write->f_pos = 0;
+		/* Use get_fs() and set_fs() to temporarily modify the addr_limit
+		   field of the current task_struct.  This will allow the read to
+		   use a buffer whose address is not in use space.
+		*/
+		orig_fs = get_fs();
+		set_fs(KERNEL_DS);
+	}
+#endif
 done:
 	mutex_unlock(&audio->lock);
 	return rc;
@@ -669,6 +736,68 @@ struct miscdevice audio_misc = {
 	.fops	= &audio_fops,
 };
 
+#ifdef CONFIG_DEBUG_FS
+static int pcm_debug_open(struct inode *inode, struct file *file)
+{
+	file->private_data = inode->i_private;
+	return 0;
+}
+
+static ssize_t pcm_debug_read(struct file *file, char __user *ubuf,
+				size_t count, loff_t *ppos)
+{
+	char lbuf[8];
+	int ret = 0;
+	ret = sprintf(lbuf, "%d\n", aud_out_enable);
+	return simple_read_from_buffer(ubuf, count, ppos, lbuf, strlen(lbuf));
+}
+
+static ssize_t pcm_debug_write(struct file *filp,
+	const char __user *ubuf, size_t cnt, loff_t *ppos)
+{
+	char *access_str = filp->private_data;
+	char lbuf[32];
+	int rc;
+
+	if (cnt > sizeof(lbuf) - 1)
+		return -EINVAL;
+
+	rc = copy_from_user(lbuf, ubuf, cnt);
+	if (rc)
+		return -EFAULT;
+
+	lbuf[cnt] = '\0';
+
+	if (!strcmp(access_str, "enable")) {
+		MM_AUD_INFO("pcm_debug_enable = %s", lbuf);
+		switch (lbuf[0]) {
+		case '1':
+			aud_out_enable = 1;
+			break;
+		case '0':
+			aud_out_enable = 0;
+			break;
+		default:
+			rc = -EINVAL;
+			break;
+		}
+	}
+
+	if (rc == 0)
+		rc = cnt;
+	else
+		MM_AUD_ERR("rc = %d\n", rc);
+
+	return rc;
+}
+
+static const struct file_operations pcm_debug_ops = {
+	.open = pcm_debug_open,
+	.write = pcm_debug_write,
+	.read = pcm_debug_read
+};
+#endif
+
 static int __init audio_init(void)
 {
 	mutex_init(&the_audio.lock);
@@ -677,6 +806,15 @@ static int __init audio_init(void)
 	init_waitqueue_head(&the_audio.wait);
 	wake_lock_init(&the_audio.wakelock, WAKE_LOCK_SUSPEND, "audio_pcm");
 	wake_lock_init(&the_audio.idlelock, WAKE_LOCK_IDLE, "audio_pcm_idle");
+
+#ifdef CONFIG_DEBUG_FS
+	debugfs_audio_out_dent = debugfs_create_dir("audio_out", 0);
+	if (!IS_ERR(debugfs_audio_out_dent)) {
+		debugfs_enable = debugfs_create_file("enable",
+		S_IFREG | S_IRUGO, debugfs_audio_out_dent,
+		(void *) "enable", &pcm_debug_ops);
+	}
+#endif
 	return misc_register(&audio_misc);
 }
 

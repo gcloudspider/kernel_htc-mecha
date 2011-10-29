@@ -25,14 +25,13 @@
 #include <linux/wait.h>
 #include <linux/err.h>
 #include <linux/interrupt.h>
+#include <linux/wakelock.h>
 
 #include <linux/types.h>
 #include <linux/device.h>
 #include <linux/miscdevice.h>
 
 #include <linux/usb/android_composite.h>
-#include <mach/board.h>
-#include <linux/wakelock.h>
 
 #define BULK_BUFFER_SIZE           4096
 
@@ -66,7 +65,7 @@ struct adb_dev {
 	wait_queue_head_t write_wq;
 
 	/* the request we're currently reading from */
-	struct usb_request *read_req;
+	struct usb_request *rx_req;
 	unsigned char *read_buf;
 	unsigned read_count;
 
@@ -127,22 +126,6 @@ static struct usb_descriptor_header *hs_adb_descs[] = {
 	NULL,
 };
 
-/* string descriptors: */
-
-static struct usb_string adb_string_defs[] = {
-	[0].s = "ADB",
-	{  } /* end of list */
-};
-
-static struct usb_gadget_strings adb_string_table = {
-	.language =		0x0409,	/* en-us */
-	.strings =		adb_string_defs,
-};
-
-static struct usb_gadget_strings *adb_strings[] = {
-	&adb_string_table,
-	NULL,
-};
 
 /* temporary variable used between adb_open() and adb_gadget_bind() */
 static struct adb_dev *_adb_dev;
@@ -343,7 +326,8 @@ requeue_req:
 			req->length = dev->maxsize?dev->maxsize:512;
 			ret = usb_ep_queue(dev->ep_out, req, GFP_ATOMIC);
 			if (ret < 0) {
-				printk(KERN_INFO "adb_read: failed to queue req (%d)\n", ret);
+				printk(KERN_INFO "adb_read: failed to queue req"
+						" (%d)\n", ret);
 				r = -EIO;
 				dev->error = 1;
 				req_put(dev, &dev->rx_idle, req);
@@ -366,8 +350,8 @@ requeue_req:
 
 			/* if we've emptied the buffer, release the request */
 			if (dev->read_count == 0) {
-				req_put(dev, &dev->rx_idle, dev->read_req);
-				dev->read_req = 0;
+				req_put(dev, &dev->rx_idle, dev->rx_req);
+				dev->rx_req = 0;
 			}
 			continue;
 		}
@@ -385,7 +369,7 @@ requeue_req:
 			if (req->actual == 0)
 				goto requeue_req;
 
-			dev->read_req = req;
+			dev->rx_req = req;
 			dev->read_count = req->actual;
 			dev->read_buf = req->buf;
 		}
@@ -658,6 +642,31 @@ static void adb_function_disable(struct usb_function *f)
 	VDBG(cdev, "%s disabled\n", dev->function.name);
 }
 
+static void
+adb_function_release(struct usb_configuration *c, struct usb_function *f)
+{
+	struct adb_dev  *dev = func_to_dev(f);
+	struct usb_request *req;
+
+#if 0
+	spin_lock_irq(&dev->lock);
+#endif
+	while ((req = req_get(dev, &dev->rx_done)))
+		adb_request_free(req, dev->ep_out);
+	while ((req = req_get(dev, &dev->rx_idle)))
+		adb_request_free(req, dev->ep_out);
+	while ((req = req_get(dev, &dev->tx_idle)))
+		adb_request_free(req, dev->ep_in);
+
+	dev->online = 0;
+	dev->error = 1;
+#if 0
+	dev->online = 0;
+	dev->error = 1;
+	spin_unlock_irq(&dev->lock);
+#endif
+}
+
 static int adb_bind_config(struct usb_configuration *c)
 {
 	struct adb_dev *dev;
@@ -682,28 +691,19 @@ static int adb_bind_config(struct usb_configuration *c)
 	INIT_LIST_HEAD(&dev->rx_idle);
 	INIT_LIST_HEAD(&dev->rx_done);
 
-	ret = usb_string_id(c->cdev);
-	if (ret < 0)
-		return ret;
-	adb_string_defs[0].id = ret;
-	adb_interface_desc.iInterface = ret;
 	dev->cdev = c->cdev;
 	dev->function.name = "adb";
-	dev->function.strings = adb_strings;
 	dev->function.descriptors = fs_adb_descs;
 	dev->function.hs_descriptors = hs_adb_descs;
 	dev->function.bind = adb_function_bind;
 	dev->function.unbind = adb_function_unbind;
 	dev->function.set_alt = adb_function_set_alt;
 	dev->function.disable = adb_function_disable;
+	dev->function.release = adb_function_release;
 	dev->maxsize = 512;
 
-	if (board_mfg_mode() != 2)
-		dev->function.hidden = 1;
-/* Workaround: enable adb first */
-#ifdef CONFIG_MACH_MECHA
-		dev->function.hidden = 0;
-#endif
+	/* start disabled */
+	dev->function.hidden = 1;
 
 	/* _adb_dev must be set before calling usb_gadget_register_driver */
 	_adb_dev = dev;

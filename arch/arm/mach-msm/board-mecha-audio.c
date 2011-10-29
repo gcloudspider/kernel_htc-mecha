@@ -429,3 +429,4 @@ void __init mecha_audio_init(void)
 	mutex_unlock(&bt_sco_lock);
 }
 
+

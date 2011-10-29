@@ -207,6 +207,7 @@ struct _mmc_csd {
  * OCR bits are mostly in host.h
  */
 #define MMC_CARD_BUSY	0x80000000	/* Card Power up status bit */
+#define MMC_CARD_SECTOR_ADDR 0x40000000 /* Card supports sectors */
 
 /*
  * Card Command Classes (CCC)
@@ -259,10 +260,12 @@ struct _mmc_csd {
 #define EXT_CSD_BUS_WIDTH	183	/* R/W */
 #define EXT_CSD_HS_TIMING	185	/* R/W */
 #define EXT_CSD_CARD_TYPE	196	/* RO */
+#define EXT_CSD_STRUCTURE	194	/* RO */
 #define EXT_CSD_REV		192	/* RO */
 #define EXT_CSD_SEC_CNT		212	/* RO, 4 bytes */
 #define EXT_CSD_S_A_TIMEOUT	217
-
+#define EXT_CSD_BOOT_SIZE_MULTI	226
+#define EXT_CSD_ERASE_GRP_DEF 175 /* R/W */
 /*
  * EXT_CSD field definitions
  */
@@ -271,9 +274,10 @@ struct _mmc_csd {
 #define EXT_CSD_CMD_SET_SECURE		(1<<1)
 #define EXT_CSD_CMD_SET_CPSECURE	(1<<2)
 
-#define EXT_CSD_CARD_TYPE_26		(1<<0)	/* Card can run at 26MHz */
-#define EXT_CSD_CARD_TYPE_52		(1<<1)	/* Card can run at 52MHz */
-#if defined(CONFIG_ARCH_MSM7X30)
+#define EXT_CSD_CARD_TYPE_26	(1<<0)	/* Card can run at 26MHz */
+#define EXT_CSD_CARD_TYPE_52	(1<<1)	/* Card can run at 52MHz */
+#define EXT_CSD_CARD_TYPE_MASK	0x3	/* Mask out reserved and DDR bits */
+#if defined(CONFIG_ARCH_MSM7X30) || defined(CONFIG_ARCH_MSM8X60)
 #define EXT_CSD_CARD_TYPE_DDR_HV	(1<<2)	/* Card can run at 52MHz */
 #define EXT_CSD_CARD_TYPE_DDR_LV	(1<<3)	/* Card can run at 52MHz */
 #endif

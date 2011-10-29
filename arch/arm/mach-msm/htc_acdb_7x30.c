@@ -50,6 +50,7 @@ static struct mutex rpc_connect_lock;
 static struct acdb_ops default_acdb_ops;
 static struct acdb_ops *the_ops = &default_acdb_ops;
 static uint32_t acdb_smem_size;
+static char acdb_init_file[64];
 
 static int acdb_init(char*);
 
@@ -70,7 +71,7 @@ static int is_rpc_connect(void)
 		endpoint = msm_rpc_connect(HTCPROG,
 				HTCVERS, 0);
 		if (IS_ERR(endpoint)) {
-			pr_err("%s: init rpc failed! rc = %ld\n",
+			pr_aud_err("%s: init rpc failed! rc = %ld\n",
 				__func__, PTR_ERR(endpoint));
 			mutex_unlock(&rpc_connect_lock);
 			return -1;
@@ -82,7 +83,7 @@ static int is_rpc_connect(void)
 
 static int update_acdb_table_size(uint32_t total_size)
 {
-	int reply_value, rc = 0;
+	int reply_value = -1, rc = 0;
 
 	struct update_size_req {
 		struct rpc_request_hdr hdr;
@@ -96,11 +97,15 @@ static int update_acdb_table_size(uint32_t total_size)
 
 	D("%s: total size = %d\n", __func__, total_size);
 	sz_req.size = cpu_to_be32(total_size);
+	sz_rep.ret = cpu_to_be32(reply_value);
 
 	rc = msm_rpc_call_reply(endpoint,
 		ONCRPC_UPDATE_TABLE_SIZE_PROC,
 		&sz_req, sizeof(sz_req),
 		&sz_rep, sizeof(sz_rep), 5 * HZ);
+
+	if (rc < 0)
+		pr_err("%s: msm_rpc_call_reply fail (%d)\n", __func__, rc);
 
 	reply_value = be32_to_cpu(sz_rep.ret);
 	if (reply_value != 0) {
@@ -114,7 +119,7 @@ static int update_acdb_table_size(uint32_t total_size)
 
 static int update_acdb_table(uint32_t size, int done)
 {
-	int reply_value, rc = 0;
+	int reply_value = -1, rc = 0;
 	struct update_table_req {
 		struct rpc_request_hdr hdr;
 		uint32_t update_size;
@@ -133,6 +138,7 @@ static int update_acdb_table(uint32_t size, int done)
 
 	tbl_req.update_size = cpu_to_be32(size);
 	tbl_req.done = cpu_to_be32(done);
+	tbl_rep.ret = cpu_to_be32(reply_value);
 
 	if (done)
 		D("%s: update table %d bytes, done %d\n",
@@ -142,6 +148,9 @@ static int update_acdb_table(uint32_t size, int done)
 		ONCRPC_REINIT_ACDB_TABLE_PROC,
 		&tbl_req, sizeof(tbl_req),
 		&tbl_rep, sizeof(tbl_rep), 5 * HZ);
+
+	if (rc < 0)
+		pr_err("%s: msm_rpc_call_reply fail (%d)\n", __func__, rc);
 
 	reply_value = be32_to_cpu(tbl_rep.ret);
 	if (reply_value != 0) {
@@ -154,13 +163,17 @@ static int update_acdb_table(uint32_t size, int done)
 }
 
 static int htc_reinit_acdb(char* filename) {
-	int rc;
+	int rc = 0;
 
 	if (strlen(filename) < 0) {
 		rc = -EINVAL;
 		goto done;
 	}
-	rc = acdb_init(filename);
+	if (strcmp(filename, acdb_init_file)) {
+		rc = acdb_init(filename);
+		if (!rc)
+			strcpy(acdb_init_file, filename);
+	}
 done:
 	D("%s: load '%s', return %d\n", __func__, filename, rc);
 	return rc;
@@ -169,7 +182,7 @@ done:
 
 static int htc_acdb_open(struct inode *inode, struct file *file)
 {
-	int reply_value;
+	int reply_value = -1;
 	int rc = -EIO;
 	struct set_smem_req {
 		struct rpc_request_hdr hdr;
@@ -194,9 +207,11 @@ static int htc_acdb_open(struct inode *inode, struct file *file)
 		else
 			acdb_smem_size = HTC_DEF_ACDB_SMEM_SIZE;
 
-		pr_info("%s: smem size %d\n", __func__, acdb_smem_size);
+		pr_aud_info("%s: smem size %d\n", __func__, acdb_smem_size);
 
 		req_smem.size = cpu_to_be32(acdb_smem_size);
+		rep_smem.n = cpu_to_be32(reply_value);
+
 		rc = msm_rpc_call_reply(endpoint,
 					ONCRPC_ALLOC_ACDB_MEM_PROC,
 					&req_smem, sizeof(req_smem),
@@ -272,12 +287,14 @@ static int acdb_init(char *filename)
 	uint32_t size = 0, ptr, acdb_radio_buffer_size = 0;
 	int rc = 0;
 
-	pr_info("acdb: load '%s'\n", filename);
+	pr_aud_info("acdb: load '%s'\n", filename);
 	if (request_firmware(&fw, filename, htc_acdb_misc.this_device) < 0) {
-		pr_err("acdb: load '%s' failed...\n", filename);
+		pr_aud_err("acdb: load '%s' failed...\n", filename);
 		return -ENODEV;
 	}
 
+	if (fw == NULL)
+		return -EINVAL;
 	db = (void*) fw->data;
 
 	if (the_ops->get_acdb_radio_buffer_size)
@@ -326,7 +343,7 @@ static int __init htc_acdb_init(void)
 	mutex_init(&rpc_connect_lock);
 	ret = misc_register(&htc_acdb_misc);
 	if (ret < 0)
-		pr_err("%s: failed to register misc device!\n", __func__);
+		pr_aud_err("%s: failed to register misc device!\n", __func__);
 
 	return ret;
 }

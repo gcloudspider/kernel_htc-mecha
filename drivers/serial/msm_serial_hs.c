@@ -42,6 +42,7 @@
 
 #include <linux/serial.h>
 #include <linux/serial_core.h>
+#include <linux/slab.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
@@ -151,7 +152,6 @@ struct msm_hs_port {
 	void (*exit_lpm_cb)(struct uart_port *);
 
 	struct wake_lock dma_wake_lock;  /* held while any DMA active */
-
 };
 
 #define MSM_UARTDM_BURST_SIZE 16   /* DM burst size (in bytes) */
@@ -414,7 +414,7 @@ static void msm_hs_set_termios(struct uart_port *uport,
 	unsigned long flags;
 	unsigned int c_cflag = termios->c_cflag;
 	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
-
+	
 	spin_lock_irqsave(&uport->lock, flags);
 	clk_enable(msm_uport->clk);
 
@@ -437,7 +437,7 @@ static void msm_hs_set_termios(struct uart_port *uport,
 			data |= SPACE_PARITY;
 		else
 			data |= EVEN_PARITY;
-	}
+		}
 
 	/* Set bits per char */
 	data &= ~UARTDM_MR2_BITS_PER_CHAR_BMSK;
@@ -640,7 +640,7 @@ static void msm_hs_start_rx_locked(struct uart_port *uport)
 }
 
 /* Enable the transmitter Interrupt */
-static void msm_hs_start_tx_locked(struct uart_port *uport)
+static void msm_hs_start_tx_locked(struct uart_port *uport )
 {
 	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
 
@@ -915,9 +915,9 @@ static int msm_hs_check_clock_off_locked(struct uart_port *uport)
 	/* Cancel if tx tty buffer is not empty, dma is in flight,
 	 * or tx fifo is not empty, or rx fifo is not empty */
 	if (msm_uport->clk_state != MSM_HS_CLK_REQUEST_OFF ||
-		!uart_circ_empty(tx_buf) || msm_uport->tx.dma_in_flight ||
-		(msm_uport->imr_reg & UARTDM_ISR_TXLEV_BMSK) ||
-		!(msm_uport->imr_reg & UARTDM_ISR_RXLEV_BMSK))  {
+	    !uart_circ_empty(tx_buf) || msm_uport->tx.dma_in_flight ||
+	    (msm_uport->imr_reg & UARTDM_ISR_TXLEV_BMSK) ||
+            !(msm_uport->imr_reg & UARTDM_ISR_RXLEV_BMSK))  {
 		return -1;
 	}
 
@@ -1019,7 +1019,7 @@ static irqreturn_t msm_hs_isr(int irq, void *dev)
 			msm_hs_write(uport, UARTDM_IMR_ADDR,
 				     msm_uport->imr_reg);
 		}
-
+	
 		/* Complete DMA TX transactions and submit new transactions */
 		tx_buf->tail = (tx_buf->tail + tx->tx_count) & ~UART_XMIT_SIZE;
 
@@ -1348,7 +1348,7 @@ static int uartdm_init_port(struct uart_port *uport)
 	return 0;
 }
 
-static int __init msm_hs_probe(struct platform_device *pdev)
+static int msm_hs_probe(struct platform_device *pdev)
 {
 	int ret;
 	struct uart_port *uport;
@@ -1413,7 +1413,7 @@ static int __init msm_hs_probe(struct platform_device *pdev)
 		return -ENXIO;
 	msm_uport->dma_tx_channel = resource->start;
 	msm_uport->dma_rx_channel = resource->end;
-
+	
 	resource = platform_get_resource_byname(pdev, IORESOURCE_DMA,
 						"uartdm_crci");
 	if (unlikely(!resource))

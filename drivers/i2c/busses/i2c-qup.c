@@ -67,6 +67,7 @@
 #include <linux/i2c.h>
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
+#include <linux/slab.h>
 #include <linux/delay.h>
 #include <linux/io.h>
 #include <linux/mutex.h>
@@ -1005,8 +1006,8 @@ err_i2c_add_adapter_failed:
 err_gsbi_failed:
 	iounmap(dev->base);
 err_ioremap_failed:
-	kfree(dev);
 err_alloc_dev_failed:
+	kfree(dev);
 err_config_failed:
 	clk_put(clk);
 	if (pclk)

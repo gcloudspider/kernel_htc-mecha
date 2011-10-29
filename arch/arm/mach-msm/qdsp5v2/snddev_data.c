@@ -56,16 +56,23 @@
  */
 #include <linux/platform_device.h>
 #include <linux/debugfs.h>
-#include <linux/mfd/marimba-codec.h>
+#include <linux/mfd/msm-adie-codec.h>
 #include <mach/qdsp5v2/snddev_icodec.h>
-#include <mach/qdsp5v2/marimba_profile.h>
 #include <mach/qdsp5v2/aux_pcm.h>
 #include <mach/qdsp5v2/snddev_ecodec.h>
 #include <mach/qdsp5v2/audio_dev_ctl.h>
+#include <mach/qdsp5v2/snddev_mi2s.h>
+#include <mach/qdsp5v2/mi2s.h>
 #include <mach/board.h>
 #include <asm/mach-types.h>
 #include <asm/uaccess.h>
 #include <mach/qdsp5v2/audio_acdb_def.h>
+
+#include <mach/qdsp5v2/marimba_profile.h>
+#include <linux/spi/spi_aic3254.h>
+#ifdef CONFIG_TIMPANI_CODEC
+#include "timpani_profile_8x60.h"
+#endif
 
 /* define the value for BT_SCO */
 #define BT_SCO_PCM_CTL_VAL (PCM_CTL__RPCM_WIDTH__LINEAR_V |\
@@ -132,7 +139,11 @@ void fm_speaker_enable(int en)
 }
 
 static struct adie_codec_action_unit iearpiece_48KHz_osr256_actions[] =
+#ifdef CONFIG_TIMPANI_CODEC
+	EAR_PRI_MONO_8000_OSR_256;
+#else
 	HANDSET_RX_48000_OSR_256;
+#endif
 
 static struct adie_codec_hwsetting_entry iearpiece_settings[] = {
 	{
@@ -160,7 +171,10 @@ static struct snddev_icodec_data snddev_iearpiece_data = {
 	.pmctl_id_sz = 0,
 	.default_sample_rate = 48000,
 	.pamp_on = handset_enable,
-	.vol_idx = Q5V2_HW_HANDSET
+	.vol_idx = Q5V2_HW_HANDSET,
+	.aic3254_id = PLAYBACK_RECEIVER,
+	.aic3254_voc_id = CALL_DOWNLINK_IMIC_RECEIVER,
+	.default_aic3254_id = PLAYBACK_RECEIVER
 };
 
 static struct platform_device msm_iearpiece_device = {
@@ -170,13 +184,25 @@ static struct platform_device msm_iearpiece_device = {
 };
 
 static struct adie_codec_action_unit imic_8KHz_osr256_actions[] =
+#ifdef CONFIG_TIMPANI_CODEC
+	LINEIN_PRI_MONO_8000_OSR_256;
+#else
 	HANDSET_TX_8000_OSR_256;
+#endif
 
 static struct adie_codec_action_unit imic_16KHz_osr256_actions[] =
+#ifdef CONFIG_TIMPANI_CODEC
+	LINEIN_PRI_MONO_8000_OSR_256;
+#else
 	HANDSET_TX_16000_OSR_256;
+#endif
 
 static struct adie_codec_action_unit imic_48KHz_osr256_actions[] =
+#ifdef CONFIG_TIMPANI_CODEC
+	LINEIN_PRI_MONO_8000_OSR_256;
+#else
 	HANDSET_TX_48000_OSR_256;
+#endif
 
 static struct adie_codec_hwsetting_entry imic_settings[] = {
 	{
@@ -216,6 +242,9 @@ static struct snddev_icodec_data snddev_imic_data = {
 	.pmctl_id_sz = 0,
 	.default_sample_rate = 48000,
 	.pamp_on = int_mic_enable,
+	.aic3254_id = VOICERECORD_IMIC,
+	.aic3254_voc_id = CALL_UPLINK_IMIC_RECEIVER,
+	.default_aic3254_id = VOICERECORD_IMIC
 };
 
 static struct platform_device msm_imic_device = {
@@ -223,6 +252,27 @@ static struct platform_device msm_imic_device = {
 	.id = 1,
 	.dev = { .platform_data = &snddev_imic_data },
 };
+
+#ifdef CONFIG_TIMPANI_CODEC
+static struct adie_codec_action_unit headset_ab_cpls_48KHz_osr256_actions[] =
+	HEADSET_AB_CPLS_48000_OSR_256;
+
+static struct adie_codec_hwsetting_entry headset_ab_cpls_settings[] = {
+	{
+		.freq_plan = 48000,
+		.osr = 256,
+		.actions = headset_ab_cpls_48KHz_osr256_actions,
+		.action_sz = ARRAY_SIZE(headset_ab_cpls_48KHz_osr256_actions),
+	}
+};
+
+static struct adie_codec_dev_profile headset_ab_cpls_profile = {
+	.path_type = ADIE_CODEC_RX,
+	.settings = headset_ab_cpls_settings,
+	.setting_sz = ARRAY_SIZE(headset_ab_cpls_settings),
+};
+
+#else
 
 static struct adie_codec_action_unit ihs_stereo_rx_48KHz_osr256_actions[] =
 	HEADSET_STEREO_RX_CAPLESS_48000_OSR_256;
@@ -241,18 +291,42 @@ static struct adie_codec_dev_profile ihs_stereo_rx_profile = {
 	.settings = ihs_stereo_rx_settings,
 	.setting_sz = ARRAY_SIZE(ihs_stereo_rx_settings),
 };
+#endif
+
+static struct snddev_mi2s_data snddev_mi2s_stereo_rx_data = {
+	.capability = SNDDEV_CAP_RX ,
+	.name = "hdmi_stereo_rx",
+	.copp_id = 3,
+	.acdb_id = ACDB_ID_HDMI,
+	.channel_mode = 2,
+	.sd_lines = MI2S_SD_0,
+	.default_sample_rate = 48000,
+};
+
+static struct platform_device msm_snddev_mi2s_stereo_rx_device = {
+	.name = "snddev_mi2s",
+	.id = 25,
+	.dev = { .platform_data = &snddev_mi2s_stereo_rx_data },
+};
 
 static struct snddev_icodec_data snddev_ihs_stereo_rx_data = {
 	.capability = (SNDDEV_CAP_RX | SNDDEV_CAP_VOICE),
 	.name = "headset_stereo_rx",
 	.copp_id = 0,
 	.acdb_id = ACDB_ID_HEADSET_SPKR_STEREO,
+#ifdef CONFIG_TIMPANI_CODEC
+	.profile = &headset_ab_cpls_profile,
+#else
 	.profile = &ihs_stereo_rx_profile,
+#endif
 	.channel_mode = 2,
 	.default_sample_rate = 48000,
 	/* change to raise ncp power. capless need ncp bias. */
 	.pamp_on = headset_enable,
-	.vol_idx = Q5V2_HW_HEADSET
+	.vol_idx = Q5V2_HW_HEADSET,
+	.aic3254_id = PLAYBACK_HEADSET,
+	.aic3254_voc_id = CALL_DOWNLINK_EMIC_HEADSET,
+	.default_aic3254_id = PLAYBACK_HEADSET
 };
 
 static struct platform_device msm_ihs_stereo_rx_device = {
@@ -345,6 +419,9 @@ static struct snddev_icodec_data snddev_ihs_mono_tx_data = {
 	.pmctl_id_sz = 0,
 	.default_sample_rate = 48000,
 	.pamp_on = ext_mic_enable,
+	.aic3254_id = VOICERECORD_EMIC,
+	.aic3254_voc_id = CALL_UPLINK_EMIC_HEADSET,
+	.default_aic3254_id = VOICERECORD_EMIC
 };
 
 static struct platform_device msm_ihs_mono_tx_device = {
@@ -389,7 +466,25 @@ static struct platform_device msm_ifmradio_handset_device = {
 	.dev = { .platform_data = &snddev_ifmradio_handset_data },
 };
 
+#ifdef CONFIG_TIMPANI_CODEC
+static struct adie_codec_action_unit ispkr_stereo_48KHz_osr256_actions[] =
+	SPEAKER_PRI_STEREO_48000_OSR_256;
 
+static struct adie_codec_hwsetting_entry ispkr_stereo_settings[] = {
+	{
+		.freq_plan = 48000,
+		.osr = 256,
+		.actions = ispkr_stereo_48KHz_osr256_actions,
+		.action_sz = ARRAY_SIZE(ispkr_stereo_48KHz_osr256_actions),
+	}
+};
+
+static struct adie_codec_dev_profile ispkr_stereo_profile = {
+	.path_type = ADIE_CODEC_RX,
+	.settings = ispkr_stereo_settings,
+	.setting_sz = ARRAY_SIZE(ispkr_stereo_settings),
+};
+#else
 static struct adie_codec_action_unit ispeaker_rx_48KHz_osr256_actions[] =
 	SPEAKER_RX_48000_OSR_256;
 
@@ -407,19 +502,28 @@ static struct adie_codec_dev_profile ispeaker_rx_profile = {
 	.settings = ispeaker_rx_settings,
 	.setting_sz = ARRAY_SIZE(ispeaker_rx_settings),
 };
+#endif
 
 static struct snddev_icodec_data snddev_ispeaker_rx_data = {
 	.capability = (SNDDEV_CAP_RX | SNDDEV_CAP_VOICE),
 	.name = "speaker_mono_rx",
 	.copp_id = 0,
+#ifdef CONFIG_TIMPANI_CODEC
+	.acdb_id = 7,
+	.profile = &ispkr_stereo_profile,
+#else
 	.acdb_id = ACDB_ID_SPKR_PHONE_MONO,
 	.profile = &ispeaker_rx_profile,
+#endif
 	.channel_mode = 2,
 	.pmctl_id = NULL,
 	.pmctl_id_sz = 0,
 	.default_sample_rate = 48000,
 	.pamp_on = speaker_enable,
-	.vol_idx = Q5V2_HW_SPEAKER
+	.vol_idx = Q5V2_HW_SPEAKER,
+	.aic3254_id = PLAYBACK_SPEAKER,
+	.aic3254_voc_id = CALL_DOWNLINK_IMIC_SPEAKER,
+	.default_aic3254_id = PLAYBACK_SPEAKER
 };
 
 static struct platform_device msm_ispeaker_rx_device = {
@@ -457,6 +561,8 @@ static struct snddev_icodec_data snddev_ifmradio_speaker_data = {
 	.default_sample_rate = 8000,
 	.pamp_on = fm_speaker_enable,
 	.dev_vol_type = SNDDEV_DEV_VOL_DIGITAL,
+	.aic3254_id = FM_OUT_SPEAKER,
+	.aic3254_voc_id = FM_OUT_SPEAKER
 };
 
 static struct platform_device msm_ifmradio_speaker_device = {
@@ -484,7 +590,7 @@ static struct adie_codec_dev_profile ifmradio_headset_profile = {
 };
 
 static struct snddev_icodec_data snddev_ifmradio_headset_data = {
-	.capability = (SNDDEV_CAP_RX | SNDDEV_CAP_FM),
+	.capability = (SNDDEV_CAP_RX | SNDDEV_CAP_VOICE),
 	.name = "fmradio_headset_rx",
 	.copp_id = 0,
 	.acdb_id = ACDB_ID_HEADSET_SPKR_STEREO,
@@ -492,7 +598,10 @@ static struct snddev_icodec_data snddev_ifmradio_headset_data = {
 	.channel_mode = 2,
 	.default_sample_rate = 48000,
 	/* change to raise ncp power. capless need ncp bias. */
-	.pamp_on = fm_headset_enable,
+	.pamp_on = headset_enable,
+	.vol_idx = Q5V2_HW_HEADSET,
+	.aic3254_id = FM_OUT_HEADSET,
+	.aic3254_voc_id = FM_OUT_HEADSET,
 };
 
 static struct platform_device msm_ifmradio_headset_device = {
@@ -685,6 +794,9 @@ static struct snddev_icodec_data snddev_ispeaker_tx_data = {
 	.pmctl_id_sz = 0,
 	.default_sample_rate = 48000,
 	.pamp_on = int_mic_enable,
+	.aic3254_id = VOICERECORD_IMIC,
+	.aic3254_voc_id = CALL_UPLINK_IMIC_SPEAKER,
+	.default_aic3254_id = VOICERECORD_IMIC
 };
 
 static struct platform_device msm_ispeaker_tx_device = {
@@ -720,7 +832,10 @@ static struct snddev_icodec_data snddev_ihs_ispk_stereo_rx_data = {
 	.channel_mode = 2,
 	.default_sample_rate = 48000,
 	.pamp_on = headset_speaker_enable,
-	.vol_idx = Q5V2_HW_HS_SPKR
+	.vol_idx = Q5V2_HW_HS_SPKR,
+	.aic3254_id = RING_HEADSET_SPEAKER,
+	.aic3254_voc_id = RING_HEADSET_SPEAKER,
+	.default_aic3254_id = RING_HEADSET_SPEAKER,
 };
 
 static struct platform_device msm_iheadset_ispeaker_rx_device = {
@@ -881,6 +996,45 @@ static struct platform_device msm_ivr_mic_device = {
 	.dev = { .platform_data = &snddev_ivr_mic_data },
 };
 
+static struct adie_codec_action_unit idual_mic_48KHz_osr256_actions[] =
+	DUAL_MIC_STEREO_TX_48000_OSR_256;
+
+static struct adie_codec_hwsetting_entry idual_mic_settings[] = {
+	{
+		.freq_plan = 48000,
+		.osr = 256,
+		.actions = idual_mic_48KHz_osr256_actions,
+		.action_sz = ARRAY_SIZE(idual_mic_48KHz_osr256_actions),
+	}
+};
+
+static struct adie_codec_dev_profile idual_mic_profile = {
+	.path_type = ADIE_CODEC_TX,
+	.settings = idual_mic_settings,
+	.setting_sz = ARRAY_SIZE(idual_mic_settings),
+};
+
+static struct snddev_icodec_data snddev_idual_mic_endfire_real_stereo_data = {
+	.capability = (SNDDEV_CAP_TX | SNDDEV_CAP_VOICE),
+	.name = "dual_mic_stereo_tx",
+	.copp_id = 0,
+	.acdb_id = 6,
+	.profile = &idual_mic_profile,
+	.channel_mode = REAL_STEREO_CHANNEL_MODE,
+	.pmctl_id = NULL,
+	.pmctl_id_sz = 0,
+	.default_sample_rate = 48000,
+	.pamp_on = int_mic_enable,
+	.aic3254_id = VIDEORECORD_IMIC,
+	.aic3254_voc_id = VOICERECORD_EMIC, /* FIX ME */
+	.default_aic3254_id = VIDEORECORD_IMIC
+};
+
+static struct platform_device msm_real_stereo_tx_device = {
+	.name = "snddev_icodec",
+	.id = 26,
+	.dev = { .platform_data = &snddev_idual_mic_endfire_real_stereo_data },
+};
 
 static struct adie_codec_action_unit ihs_vr_mic_48KHz_osr256_actions[] =
 	HEADSET_MONO_TX_48000_OSR_256;
@@ -915,7 +1069,7 @@ static struct snddev_icodec_data snddev_ihs_vr_mic_data = {
 
 static struct platform_device msm_ihs_vr_mic_device = {
 	.name = "snddev_icodec",
-	.id = 26,
+	.id = 27,
 	.dev = { .platform_data = &snddev_ihs_vr_mic_data },
 };
 
@@ -939,6 +1093,8 @@ static struct platform_device *snd_devices_surf[] __initdata = {
 	&msm_ihac_rx_device,
 	&msm_ialt_rx_device,
 	&msm_ivr_mic_device,
+	&msm_real_stereo_tx_device,
+	&msm_snddev_mi2s_stereo_rx_device,
 	&msm_ihs_vr_mic_device
 };
 

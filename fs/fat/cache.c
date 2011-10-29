@@ -9,6 +9,7 @@
  */
 
 #include <linux/fs.h>
+#include <linux/slab.h>
 #include <linux/buffer_head.h>
 #include "fat.h"
 
@@ -154,10 +155,14 @@ static void fat_cache_add(struct inode *inode, struct fat_cache_id *new)
 			cache = fat_cache_merge(inode, new);
 			if (cache != NULL) {
 				MSDOS_I(inode)->nr_caches--;
-				fat_cache_free(tmp);
+				if (tmp)
+					fat_cache_free(tmp);
 				goto out_update_lru;
 			}
-			cache = tmp;
+			if (tmp)
+				cache = tmp;
+			else
+				goto out;
 		} else {
 			struct list_head *p = MSDOS_I(inode)->cache_lru.prev;
 			cache = list_entry(p, struct fat_cache, cache_list);
@@ -241,9 +246,10 @@ int fat_get_cluster(struct inode *inode, int cluster, int *fclus, int *dclus)
 	while (*fclus < cluster) {
 		/* prevent the infinite loop of cluster chain */
 		if (*fclus > limit) {
-			fat_fs_error(sb, "%s: detected the cluster chain loop"
-				     " (i_pos %lld)", __func__,
-				     MSDOS_I(inode)->i_pos);
+			fat_fs_error_ratelimit(sb,
+					"%s: detected the cluster chain loop"
+					" (i_pos %lld)", __func__,
+					MSDOS_I(inode)->i_pos);
 			nr = -EIO;
 			goto out;
 		}
@@ -252,9 +258,9 @@ int fat_get_cluster(struct inode *inode, int cluster, int *fclus, int *dclus)
 		if (nr < 0)
 			goto out;
 		else if (nr == FAT_ENT_FREE) {
-			fat_fs_error(sb, "%s: invalid cluster chain"
-				     " (i_pos %lld)", __func__,
-				     MSDOS_I(inode)->i_pos);
+			fat_fs_error_ratelimit(sb, "%s: invalid cluster chain"
+					       " (i_pos %lld)", __func__,
+					       MSDOS_I(inode)->i_pos);
 			nr = -EIO;
 			goto out;
 		} else if (nr == FAT_ENT_EOF) {

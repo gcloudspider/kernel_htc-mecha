@@ -25,6 +25,7 @@
 #include <linux/delay.h>
 #include <linux/clk.h>
 #include <linux/platform_device.h>
+#include <linux/slab.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/initval.h>
@@ -76,7 +77,6 @@ EXPORT_SYMBOL_GPL(msm_dais);
 
 int msm_pcm_probe(struct platform_device *devptr)
 {
-	struct snd_card *card;
 	struct snd_soc_codec *codec;
 	int ret;
 
@@ -102,18 +102,8 @@ int msm_pcm_probe(struct platform_device *devptr)
 		goto __nopcm;
 	}
 
-	card = socdev->card->codec->card;
-
-	ret = snd_soc_init_card(socdev);
-	if (ret < 0) {
-		printk(KERN_ERR "msm_soc: failed to register card\n");
-		goto __nodev;
-	}
-
 	return 0;
 
-__nodev:
-	snd_soc_free_pcms(socdev);
 __nopcm:
 	kfree(codec);
 	return ret;

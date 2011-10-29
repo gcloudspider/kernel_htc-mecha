@@ -120,7 +120,31 @@ void *snd_lookup_minor_data(unsigned int minor, int type)
 
 EXPORT_SYMBOL(snd_lookup_minor_data);
 
-static int __snd_open(struct inode *inode, struct file *file)
+#ifdef CONFIG_MODULES
+static struct snd_minor *autoload_device(unsigned int minor)
+{
+	int dev;
+	mutex_unlock(&sound_mutex); /* release lock temporarily */
+	dev = SNDRV_MINOR_DEVICE(minor);
+	if (dev == SNDRV_MINOR_CONTROL) {
+		/* /dev/aloadC? */
+		int card = SNDRV_MINOR_CARD(minor);
+		if (card < 0 || card >= SNDRV_CARDS)
+			return NULL;
+		if (snd_cards[card] == NULL)
+			snd_request_card(card);
+	} else if (dev == SNDRV_MINOR_GLOBAL) {
+		/* /dev/aloadSEQ */
+		snd_request_other(minor);
+	}
+	mutex_lock(&sound_mutex); /* reacuire lock */
+	return snd_minors[minor];
+}
+#else /* !CONFIG_MODULES */
+#define autoload_device(minor)	NULL
+#endif /* CONFIG_MODULES */
+
+static int snd_open(struct inode *inode, struct file *file)
 {
 	unsigned int minor = iminor(inode);
 	struct snd_minor *mptr = NULL;
@@ -129,53 +153,34 @@ static int __snd_open(struct inode *inode, struct file *file)
 
 	if (minor >= ARRAY_SIZE(snd_minors))
 		return -ENODEV;
+	mutex_lock(&sound_mutex);
 	mptr = snd_minors[minor];
 	if (mptr == NULL) {
-#ifdef CONFIG_MODULES
-		int dev = SNDRV_MINOR_DEVICE(minor);
-		if (dev == SNDRV_MINOR_CONTROL) {
-			/* /dev/aloadC? */
-			int card = SNDRV_MINOR_CARD(minor);
-			if (snd_cards[card] == NULL)
-				snd_request_card(card);
-		} else if (dev == SNDRV_MINOR_GLOBAL) {
-			/* /dev/aloadSEQ */
-			snd_request_other(minor);
-		}
-#ifndef CONFIG_SND_DYNAMIC_MINORS
-		/* /dev/snd/{controlC?,seq} */
-		mptr = snd_minors[minor];
-		if (mptr == NULL)
-#endif
-#endif
+		mptr = autoload_device(minor);
+		if (!mptr) {
+			mutex_unlock(&sound_mutex);
 			return -ENODEV;
+		}
 	}
 	old_fops = file->f_op;
 	file->f_op = fops_get(mptr->f_ops);
 	if (file->f_op == NULL) {
 		file->f_op = old_fops;
-		return -ENODEV;
+		err = -ENODEV;
 	}
-	if (file->f_op->open)
+	mutex_unlock(&sound_mutex);
+	if (err < 0)
+		return err;
+
+	if (file->f_op->open) {
 		err = file->f_op->open(inode, file);
-	if (err) {
-		fops_put(file->f_op);
-		file->f_op = fops_get(old_fops);
+		if (err) {
+			fops_put(file->f_op);
+			file->f_op = fops_get(old_fops);
+		}
 	}
 	fops_put(old_fops);
 	return err;
-}
-
-
-/* BKL pushdown: nasty #ifdef avoidance wrapper */
-static int snd_open(struct inode *inode, struct file *file)
-{
-	int ret;
-
-	lock_kernel();
-	ret = __snd_open(inode, file);
-	unlock_kernel();
-	return ret;
 }
 
 static const struct file_operations snd_fops =
@@ -210,7 +215,11 @@ static int snd_kernel_minor(int type, struct snd_card *card, int dev)
 		minor = type;
 		break;
 	case SNDRV_DEVICE_TYPE_CONTROL:
+#if defined(CONFIG_SND_DEBUG)
 		if (snd_BUG_ON(!card))
+#else
+		if (!card)
+#endif
 			return -EINVAL;
 		minor = SNDRV_MINOR(card->number, type);
 		break;
@@ -218,7 +227,11 @@ static int snd_kernel_minor(int type, struct snd_card *card, int dev)
 	case SNDRV_DEVICE_TYPE_RAWMIDI:
 	case SNDRV_DEVICE_TYPE_PCM_PLAYBACK:
 	case SNDRV_DEVICE_TYPE_PCM_CAPTURE:
+#if defined(CONFIG_SND_DEBUG)
 		if (snd_BUG_ON(!card))
+#else
+		if (!card)
+#endif
 			return -EINVAL;
 		minor = SNDRV_MINOR(card->number, type + dev);
 		break;
@@ -329,7 +342,7 @@ int snd_unregister_device(int type, struct snd_card *card, int dev)
 
 	mutex_lock(&sound_mutex);
 	minor = find_snd_minor(type, card, dev);
-	if (minor < 0) {
+	if (minor < 0 || minor >= SNDRV_OS_MINORS) {
 		mutex_unlock(&sound_mutex);
 		return -EINVAL;
 	}
@@ -352,7 +365,8 @@ int snd_add_device_sysfs_file(int type, struct snd_card *card, int dev,
 
 	mutex_lock(&sound_mutex);
 	minor = find_snd_minor(type, card, dev);
-	if (minor >= 0 && (d = snd_minors[minor]->dev) != NULL)
+	if (minor >= 0 && minor < SNDRV_OS_MINORS &&
+	    (d = snd_minors[minor]->dev) != NULL)
 		ret = device_create_file(d, attr);
 	mutex_unlock(&sound_mutex);
 	return ret;
@@ -468,5 +482,5 @@ static void __exit alsa_sound_exit(void)
 	unregister_chrdev(major, "alsa");
 }
 
-module_init(alsa_sound_init)
-module_exit(alsa_sound_exit)
+subsys_initcall(alsa_sound_init);
+module_exit(alsa_sound_exit);

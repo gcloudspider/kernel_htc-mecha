@@ -1,57 +1,18 @@
 /* Copyright (c) 2009-2010, Code Aurora Forum. All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in the
- *       documentation and/or other materials provided with the distribution.
- *     * Neither the name of Code Aurora Forum nor
- *       the names of its contributors may be used to endorse or promote
- *       products derived from this software without specific prior written
- *       permission.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
  *
- * Alternatively, provided that this notice is retained in full, this software
- * may be relicensed by the recipient under the terms of the GNU General Public
- * License version 2 ("GPL") and only version 2, in which case the provisions of
- * the GPL apply INSTEAD OF those given above.  If the recipient relicenses the
- * software under the GPL, then the identification text in the MODULE_LICENSE
- * macro must be changed to reflect "GPLv2" instead of "Dual BSD/GPL".  Once a
- * recipient changes the license terms to the GPL, subsequent recipients shall
- * not relicense under alternate licensing terms, including the BSD or dual
- * BSD/GPL terms.  In addition, the following license statement immediately
- * below and between the words START and END shall also then apply when this
- * software is relicensed under the GPL:
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  *
- * START
- *
- * This program is free software; you can redistribute it and/or modify it under
- * the terms of the GNU General Public License version 2 and only version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- * FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
- * details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
- * END
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
  *
  */
 #include <linux/module.h>
@@ -63,7 +24,8 @@
 #include <mach/qdsp5v2/audio_dev_ctl.h>
 #include <linux/wait.h>
 #include <linux/sched.h>
-#include <mach/debug_audio_mm.h>
+#include <linux/slab.h>
+#include <mach/debug_mm.h>
 #include <mach/qdsp5v2/qdsp5audppmsg.h>
 #include <mach/qdsp5v2/audpp.h>
 
@@ -85,8 +47,8 @@ struct audio_dev_ctrl_state {
 
 static struct audio_dev_ctrl_state audio_dev_ctrl;
 struct event_listner event;
-#define MAX_DEC_SESSIONS	6
-#define MAX_ENC_SESSIONS	2
+#define MAX_DEC_SESSIONS	7
+#define MAX_ENC_SESSIONS	3
 
 struct session_freq {
 	int freq;
@@ -106,31 +68,27 @@ struct audio_routing_info {
 	signed int voice_rx_vol;
 	int tx_mute;
 	int rx_mute;
-	int voice_state;
+	int call_state;
 };
 
 static struct audio_routing_info routing_info;
 
-int msm_get_voice_state(void)
+int msm_get_call_state(void)
 {
-        MM_DBG("voice state %d\n", routing_info.voice_state);
-        return routing_info.voice_state;
+	pr_debug("call state %d\n", routing_info.call_state);
+	return routing_info.call_state;
 }
-EXPORT_SYMBOL(msm_get_voice_state);
+EXPORT_SYMBOL(msm_get_call_state);
 
 int msm_set_voice_mute(int dir, int mute)
 {
-	MM_ERR("dir %x mute %x\n", dir, mute);
-        if (!audio_dev_ctrl.voice_rx_dev
-                || !audio_dev_ctrl.voice_tx_dev)
-                return -EPERM;
+	MM_AUD_INFO("dir %x mute %x\n", dir, mute);
 	if (dir == DIR_TX) {
 		routing_info.tx_mute = mute;
 		broadcast_event(AUDDEV_EVT_DEVICE_VOL_MUTE_CHG,
 			routing_info.voice_tx_dev_id, SESSION_IGNORE);
 	} else{
 		routing_info.rx_mute = mute;
-		pr_info("%s, rx_mute=%d\n", __func__, routing_info.rx_mute);
 		broadcast_event(AUDDEV_EVT_DEVICE_VOL_MUTE_CHG,
 			routing_info.voice_rx_dev_id, SESSION_IGNORE);
 	}
@@ -140,9 +98,6 @@ EXPORT_SYMBOL(msm_set_voice_mute);
 
 int msm_set_voice_vol(int dir, s32 volume)
 {
-        if (!audio_dev_ctrl.voice_rx_dev
-                || !audio_dev_ctrl.voice_tx_dev)
-                return -EPERM;
 	if (dir == DIR_TX) {
 		routing_info.voice_tx_vol = volume;
 		broadcast_event(AUDDEV_EVT_DEVICE_VOL_MUTE_CHG,
@@ -168,7 +123,7 @@ void msm_snddev_register(struct msm_snddev_info *dev_info)
 		dev_info->sessions = 0x0;
 		audio_dev_ctrl.num_dev++;
 	} else
-		MM_ERR("%s: device registry max out\n", __func__);
+		MM_AUD_ERR("%s: device registry max out\n", __func__);
 	mutex_unlock(&session_lock);
 }
 EXPORT_SYMBOL(msm_snddev_register);
@@ -247,7 +202,7 @@ int msm_set_voc_route(struct msm_snddev_info *dev_info,
 	u32 session_mask = 0;
 
 	if (dev_info == NULL) {
-		MM_ERR("%s: invalid device info\n", __func__);
+		MM_AUD_ERR("%s: invalid device info\n", __func__);
 		return -EINVAL;
 	}
 	mutex_lock(&session_lock);
@@ -423,7 +378,7 @@ int auddev_register_evt_listner(u32 evt_id, u32 clnt_type, u32 clnt_id,
 
 	new_cb = kzalloc(sizeof(struct msm_snd_evt_listner), GFP_KERNEL);
 	if (!new_cb) {
-		MM_ERR("No memory to add new listener node\n");
+		MM_AUD_ERR("No memory to add new listener node\n");
 		return -ENOMEM;
 	}
 
@@ -589,7 +544,11 @@ int msm_snddev_request_freq(int *freq, u32 session_id,
 				continue;
 			}
 			set_freq = MAX(*freq, info->set_sample_rate);
-
+			if (set_freq == info->set_sample_rate) {
+				rc = info->set_sample_rate;
+				*freq = info->set_sample_rate;
+				continue;
+			}
 
 			if (clnt_type == AUDDEV_CLNT_DEC) {
 				routing_info.dec_freq[session_id].evt = 1;
@@ -633,7 +592,7 @@ int msm_snddev_enable_sidetone(u32 dev_id, u32 enable)
 	dev_info = audio_dev_ctrl_find_dev(dev_id);
 
 	if (IS_ERR(dev_info)) {
-		MM_ERR("bad dev_id %d\n", dev_id);
+		MM_AUD_ERR("bad dev_id %d\n", dev_id);
 		rc = -EINVAL;
 	} else if (!dev_info->dev_ops.enable_sidetone) {
 		MM_DBG("dev %d no sidetone support\n", dev_id);
@@ -711,7 +670,7 @@ static int audio_dev_ctrl_ioctl(struct inode *inode, struct file *file,
 		route_cfg.dev_id, route_cfg.stream_type);
 		dev_info = audio_dev_ctrl_find_dev(route_cfg.dev_id);
 		if (IS_ERR(dev_info)) {
-			MM_ERR("%s: pass invalid dev_id\n", __func__);
+			MM_AUD_ERR("%s: pass invalid dev_id\n", __func__);
 			rc = PTR_ERR(dev_info);
 			break;
 		}
@@ -793,13 +752,10 @@ void broadcast_event(u32 evt_id, u32 dev_id, u32 session_id)
 
 	if ((evt_id != AUDDEV_EVT_START_VOICE)
 		&& (evt_id != AUDDEV_EVT_END_VOICE)
-		&& (evt_id != AUDDEV_EVT_STREAM_VOL_CHG)
-		&& (evt_id != AUDDEV_EVT_VOICE_STATE_CHG)) {
+		&& (evt_id != AUDDEV_EVT_STREAM_VOL_CHG)) {
 		dev_info = audio_dev_ctrl_find_dev(dev_id);
-		if (IS_ERR(dev_info)) {
-			MM_ERR("pass invalid dev_id\n");
+		if (IS_ERR(dev_info))
 			return;
-		}
 	}
 
 	if (event.cb != NULL)
@@ -808,14 +764,11 @@ void broadcast_event(u32 evt_id, u32 dev_id, u32 session_id)
 		return;
 	mutex_lock(&session_lock);
 
-        if (evt_id == AUDDEV_EVT_VOICE_STATE_CHG)
-                routing_info.voice_state = dev_id;
-
 	evt_payload = kzalloc(sizeof(union auddev_evt_data),
 			GFP_KERNEL);
 
 	if (!evt_payload) {
-		MM_ERR("%s: fail to allocate memory\n", __func__);
+		MM_AUD_ERR("%s: fail to allocate memory\n", __func__);
 		return;
 	}
 
@@ -831,6 +784,11 @@ void broadcast_event(u32 evt_id, u32 dev_id, u32 session_id)
 		clnt_id = callback->clnt_id;
 		memset(evt_payload, 0, sizeof(union auddev_evt_data));
 
+		if (evt_id == AUDDEV_EVT_START_VOICE)
+			routing_info.call_state = 1;
+		if (evt_id == AUDDEV_EVT_END_VOICE)
+			routing_info.call_state = 0;
+
 		if ((evt_id == AUDDEV_EVT_START_VOICE)
 			|| (evt_id == AUDDEV_EVT_END_VOICE))
 			goto skip_check;
@@ -840,10 +798,8 @@ void broadcast_event(u32 evt_id, u32 dev_id, u32 session_id)
 		session_mask = (0x1 << (clnt_id))
 				<< (8 * ((int)callback->clnt_type-1));
 
-                if ((evt_id == AUDDEV_EVT_STREAM_VOL_CHG) || 
-                        (evt_id == AUDDEV_EVT_VOICE_STATE_CHG)) {
-			MM_DBG("AUDDEV_EVT_STREAM_VOL_CHG or\
-                                AUDDEV_EVT_VOICE_STATE_CHG\n");
+		if (evt_id == AUDDEV_EVT_STREAM_VOL_CHG) {
+			MM_DBG("AUDDEV_EVT_STREAM_VOL_CHG\n");
 			goto volume_strm;
 		}
 
@@ -889,18 +845,14 @@ volume_strm:
 					evt_payload->freq_info.acdb_dev_id
 						= dev_info->acdb_id;
 				}
-			} else if (evt_id == AUDDEV_EVT_VOICE_STATE_CHG)
-                                evt_payload->voice_state =
-                                        routing_info.voice_state;
-                        else
+			} else
 				evt_payload->routing_id = dev_info->copp_id;
 			callback->auddev_evt_listener(
 					evt_id,
 					evt_payload,
 					callback->private_data);
 sent_dec:
-                        if ((evt_id != AUDDEV_EVT_STREAM_VOL_CHG) &&
-                                (evt_id != AUDDEV_EVT_VOICE_STATE_CHG))
+			if (evt_id != AUDDEV_EVT_STREAM_VOL_CHG)
 				routing_info.dec_freq[clnt_id].freq
 						= dev_info->set_sample_rate;
 
@@ -926,10 +878,7 @@ sent_dec:
 					evt_payload->freq_info.acdb_dev_id
 						= dev_info->acdb_id;
 				}
-			} else if (evt_id == AUDDEV_EVT_VOICE_STATE_CHG)
-                                evt_payload->voice_state =
-                                        routing_info.voice_state;
-                        else
+			} else if (dev_info != NULL)
 				evt_payload->routing_id = dev_info->copp_id;
 			callback->auddev_evt_listener(
 					evt_id,
@@ -945,44 +894,20 @@ sent_enc:
 		}
 aud_cal:
 		if (callback->clnt_type == AUDDEV_CLNT_AUDIOCAL) {
-                        int temp_sessions;
 			MM_DBG("AUDDEV_CLNT_AUDIOCAL\n");
-			if (evt_id == AUDDEV_EVT_VOICE_STATE_CHG)
-                                evt_payload->voice_state =
-                                        routing_info.voice_state;
-                        else if (!dev_info->sessions)
+			if (!dev_info->sessions)
 				goto sent_aud_cal;
-			else {
-                                evt_payload->audcal_info.dev_id =
-                                                dev_info->copp_id;
-                                evt_payload->audcal_info.acdb_id =
-                                                dev_info->acdb_id;
-                                evt_payload->audcal_info.dev_type =
-                                        (dev_info->capability & SNDDEV_CAP_TX) ?
-                                        SNDDEV_CAP_TX : SNDDEV_CAP_RX;
-                                evt_payload->audcal_info.sample_rate =
-                                        dev_info->set_sample_rate ?
-                                        dev_info->set_sample_rate :
-                                        dev_info->sample_rate;
-                        }
-                        if (evt_payload->audcal_info.dev_type ==
-                                                SNDDEV_CAP_TX) {
-                                if (session_id == SESSION_IGNORE)
-                                        temp_sessions = dev_info->sessions;
-                                else
-                                        temp_sessions = session_id;
-                                evt_payload->audcal_info.sessions =
-                                        (temp_sessions >>
-                                                ((AUDDEV_CLNT_ENC-1) * 8));
-                        } else {
-                                if (session_id == SESSION_IGNORE)
-                                        temp_sessions = dev_info->sessions;
-                                else
-                                        temp_sessions = session_id;
-                                evt_payload->audcal_info.sessions =
-                                        (temp_sessions >>
-                                                ((AUDDEV_CLNT_DEC-1) * 8));
-                        }
+			evt_payload->audcal_info.dev_id = dev_info->copp_id;
+			evt_payload->audcal_info.acdb_id =
+				dev_info->acdb_id;
+			evt_payload->audcal_info.dev_type =
+				(dev_info->capability & SNDDEV_CAP_TX) ?
+				SNDDEV_CAP_TX : SNDDEV_CAP_RX;
+			evt_payload->audcal_info.sample_rate =
+				dev_info->set_sample_rate ?
+				dev_info->set_sample_rate :
+				dev_info->sample_rate;
+
 			callback->auddev_evt_listener(
 				evt_id,
 				evt_payload,
@@ -1049,10 +974,7 @@ voc_events:
 						= dev_info->acdb_id;
 				} else
 					goto sent_voc;
-			} else if (evt_id == AUDDEV_EVT_VOICE_STATE_CHG)
-                                evt_payload->voice_state =
-                                                routing_info.voice_state;
-			else {
+			} else {
 				evt_payload->voc_devinfo.dev_type =
 					(dev_info->capability & SNDDEV_CAP_TX) ?
 					SNDDEV_CAP_TX : SNDDEV_CAP_RX;
@@ -1139,7 +1061,6 @@ static int __init audio_dev_ctrl_init(void)
 	audio_dev_ctrl.num_dev = 0;
 	audio_dev_ctrl.voice_tx_dev = NULL;
 	audio_dev_ctrl.voice_rx_dev = NULL;
-        routing_info.voice_state = VOICE_STATE_INVALID;
 	return misc_register(&audio_dev_ctrl_misc);
 }
 
@@ -1150,4 +1071,4 @@ module_init(audio_dev_ctrl_init);
 module_exit(audio_dev_ctrl_exit);
 
 MODULE_DESCRIPTION("MSM 7K Audio Device Control driver");
-MODULE_LICENSE("Dual BSD/GPL");
+MODULE_LICENSE("GPL v2");

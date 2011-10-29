@@ -24,6 +24,7 @@
 /*include <linux/mfd/pm8058.h>*/
 #include <linux/mfd/pmic8058.h>
 #include <linux/platform_device.h>
+#include <linux/slab.h>
 #include <linux/wait.h>
 #include <asm-generic/gpio.h>
 
@@ -501,7 +502,7 @@ static int do_irq_master(struct pm8058 *pmic, int group)
 	if (debug_mask & DEBUG_IRQS)
 		pr_info("%s: master %d %02x\n", __func__, group, val);
 	stat = val & pm8058_irq_groups[group].valid_mask;
-	for_each_bit(i, &stat, BITS_PER_BYTE) {
+	for_each_set_bit(i, &stat, BITS_PER_BYTE) {
 		u8 blk = pm8058_irq_groups[group].block_offset + i;
 		unsigned long blk_stat;
 
@@ -512,7 +513,7 @@ static int do_irq_master(struct pm8058 *pmic, int group)
 		}
 
 		blk_stat = val;
-		for_each_bit(j, &blk_stat, BITS_PER_BYTE) {
+		for_each_set_bit(j, &blk_stat, BITS_PER_BYTE) {
 			u8 irq = blk * 8 + j;
 
 			/* XXX: we should mask these out and count em' */
@@ -721,6 +722,7 @@ static int pm8058_irq_init(struct pm8058 *pmic, unsigned int irq_base)
 			set_irq_handler(irq_base + irq, handle_edge_irq);
 			set_irq_flags(irq_base + irq, IRQF_VALID);
 		}
+
 	}
 
 	return 0;
@@ -781,7 +783,7 @@ static int add_sub_device(struct pm8058 *pmic, struct pm8058_sub_devices_data *p
 	if (!pdev) {
 		pr_err("%s: cannot allocate pdev for %s\n", __func__, name);
 		return -ENOMEM;
-	}
+}
 
 	pdev->dev.parent = pmic->dev;
 	platform_set_drvdata(pdev, pdata->driver_data);

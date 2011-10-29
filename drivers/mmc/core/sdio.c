@@ -28,6 +28,10 @@
 #include <linux/mmc/sdio_ids.h>
 #endif
 
+#ifdef CONFIG_WIMAX
+extern int mmc_wimax_get_sdcclk_highspeed(void);
+#endif
+
 static int sdio_read_fbr(struct sdio_func *func)
 {
 	int ret;
@@ -163,7 +167,7 @@ static int sdio_enable_wide(struct mmc_card *card)
 		ctrl |= SDIO_BUS_WIDTH_8BIT;
 	} else {
 		width = MMC_BUS_WIDTH_4;
-	ctrl |= SDIO_BUS_WIDTH_4BIT;
+		ctrl |= SDIO_BUS_WIDTH_4BIT;
 	}
 
 	ret = mmc_io_rw_direct(card, 1, 0, SDIO_CCCR_IF, ctrl, NULL);
@@ -197,7 +201,41 @@ static int sdio_disable_cd(struct mmc_card *card)
 
 	return mmc_io_rw_direct(card, 1, 0, SDIO_CCCR_IF, ctrl, NULL);
 }
+#if 0
+/*
+ * Devices that remain active during a system suspend are
+ * put back into 1-bit mode.
+ */
+static int sdio_disable_wide(struct mmc_card *card)
+{
+	int ret;
+	u8 ctrl;
 
+	if (!(card->host->caps & (MMC_CAP_4_BIT_DATA | MMC_CAP_8_BIT_DATA)))
+		return 0;
+
+	if (card->cccr.low_speed && !card->cccr.wide_bus)
+		return 0;
+
+	ret = mmc_io_rw_direct(card, 0, 0, SDIO_CCCR_IF, 0, &ctrl);
+	if (ret)
+		return ret;
+
+	if (!(ctrl & (SDIO_BUS_WIDTH_4BIT | SDIO_BUS_WIDTH_8BIT)))
+		return 0;
+
+	ctrl &= ~(SDIO_BUS_WIDTH_4BIT | SDIO_BUS_WIDTH_8BIT);
+	ctrl |= SDIO_BUS_ASYNC_INT;
+
+	ret = mmc_io_rw_direct(card, 1, 0, SDIO_CCCR_IF, ctrl, NULL);
+	if (ret)
+		return ret;
+
+	mmc_set_bus_width(card->host, MMC_BUS_WIDTH_1);
+
+	return 0;
+}
+#endif
 /*
  * Test if the card supports high-speed mode and, if so, switch to it.
  */
@@ -355,7 +393,25 @@ static int mmc_sdio_init_card(struct mmc_host *host, u32 ocr,
 		 */
 		mmc_set_clock(host, 50000000);
 	} else {
-		mmc_set_clock(host, card->cis.max_dtr);
+#ifdef CONFIG_WIMAX
+#ifdef CONFIG_WIMAX_MMC
+		if ( !(strcmp(mmc_hostname(host), CONFIG_WIMAX_MMC))) {
+			if (mmc_wimax_get_sdcclk_highspeed()) {
+				/* Only for wimax slot, to force speed to 49152000 */
+				mmc_set_clock(host, 49152000);
+			} else {
+				mmc_set_clock(host, card->cis.max_dtr);
+			}
+		}
+		else {
+			mmc_set_clock(host, card->cis.max_dtr);
+		}
+#else
+		mmc_set_clock(host, card->cis.max_dtr); 
+#endif
+#else
+     mmc_set_clock(host, card->cis.max_dtr);
+#endif
 	}
 
 	/*
@@ -455,7 +511,13 @@ static int mmc_sdio_suspend(struct mmc_host *host)
 			pmops->resume(&func->dev);
 		}
 	}
-
+#if 0
+	if (!err && host->pm_flags & MMC_PM_KEEP_POWER) {
+		mmc_claim_host(host);
+		sdio_disable_wide(host->card);
+		mmc_release_host(host);
+	}
+#endif
 	return err;
 }
 
@@ -470,6 +532,13 @@ static int mmc_sdio_resume(struct mmc_host *host)
 	mmc_claim_host(host);
 	err = mmc_sdio_init_card(host, host->ocr, host->card,
 				 (host->pm_flags & MMC_PM_KEEP_POWER));
+#if 0
+	if (!err)
+		/* We may have switched to 1-bit mode during suspend. */
+		err = sdio_enable_wide(host->card);
+	if (!err && host->sdio_irqs)
+		mmc_signal_sdio_irq(host);
+#endif
 	mmc_release_host(host);
 
 	/*
@@ -692,7 +761,24 @@ int sdio_reset_comm(struct mmc_card *card)
 		 */
 		mmc_set_clock(host, 50000000);
 	} else {
+#ifdef CONFIG_WIMAX
+#ifdef CONFIG_WIMAX_MMC
+		if ( !(strcmp(mmc_hostname(host), CONFIG_WIMAX_MMC))) {
+			if (mmc_wimax_get_sdcclk_highspeed()) {
+				/* Only for wimax slot, to force speed to 49152000 */
+				mmc_set_clock(host, 49152000);
+			} else {
+				mmc_set_clock(host, card->cis.max_dtr);
+			}
+		} else {
+			mmc_set_clock(host, card->cis.max_dtr);
+		}
+#else
 		mmc_set_clock(host, card->cis.max_dtr);
+#endif
+#else
+		mmc_set_clock(host, card->cis.max_dtr);
+#endif
 	}
 
 	err = sdio_enable_wide(card);

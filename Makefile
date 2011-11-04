@@ -1,7 +1,7 @@
 VERSION = 2
 PATCHLEVEL = 6
 SUBLEVEL = 35
-EXTRAVERSION = .10-bamf_0.3
+EXTRAVERSION = .10-bamf_0.4
 NAME = Yokohama
 
 # *DOCUMENTATION*
@@ -570,10 +570,7 @@ ifdef CONFIG_DEBUG_SECTION_MISMATCH
 KBUILD_CFLAGS += $(call cc-option, -fno-inline-functions-called-once)
 endif
 
-# Force warning message as hard error
-ifdef CONFIG_FORCE_WARNING_AS_ERROR
-KBUILD_CFLAGS += -Werror
-endif
+
 
 # arch Makefile may override CC so keep this after arch Makefile is included
 NOSTDINC_FLAGS += -nostdinc -isystem $(shell $(CC) -print-file-name=include)
